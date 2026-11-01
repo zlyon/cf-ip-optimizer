@@ -130,7 +130,7 @@
   .caret{width:22px;height:22px;padding:0;border:none;background:transparent;color:var(--muted);font-size:11px;border-radius:6px;flex:none}
   .caret:hover{background:#1b2735;transform:none}
   .tblock.clip .caret{transform:rotate(-90deg)}
-  .ttitles{min-width:0;display:flex;flex-direction:column;gap:1px;flex:1}
+  .ttitles{min-width:0;display:flex;flex-direction:column;gap:1px;flex:1 1 auto}
   .tblock .tlabel{width:100%;max-width:260px;padding:3px 7px;font-size:13px;font-weight:600;
     background:transparent;border:1px solid transparent;border-radius:7px}
   .tblock .tlabel:hover{border-color:var(--line)}
@@ -141,7 +141,7 @@
   .stchip.err{color:#fca5a5;border-color:rgba(248,113,113,.32);background:rgba(248,113,113,.08)}
   .mini{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;margin:0}
   .mini input{width:15px;height:15px;accent-color:var(--accent)}
-  .tctrl{display:flex;align-items:center;gap:7px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+  .tctrl{display:flex;align-items:center;gap:7px;margin-left:auto;flex:0 0 auto}
   .icon{padding:5px 10px;font-size:12px;border-radius:8px;flex:none}
   .tmeta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:12px;padding-top:10px;
     border-top:1px dashed var(--line);font-size:12px}
@@ -964,8 +964,9 @@ async function loadDashboard() {
 
     const first = TARGETS.find(t => t.configured && !((t.state || {}).dns_checked_at));
     if (!dirty.size && first && !dnsTried && data.settings && data.settings.has_token) {
+      // 首次进入把所有块的当前解析读一遍，失败也只试一次，避免轮询里反复打 CF
       dnsTried = true;
-      api('/api/refresh-dns', { method: 'POST', body: { target_id: first.id } })
+      api('/api/refresh-dns', { method: 'POST', body: {} })
         .then(() => loadDashboard())
         .catch(() => {});
     }
