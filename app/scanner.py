@@ -4,7 +4,11 @@
 环境变量），所以测出来的就是本机到该 IP 的真实链路质量。
 
 评分口径：
-  - 每一轮成功 = 完成 TLS 握手 + 收到 HTTP 响应首字节
+  - 每一轮成功 = TLS 握手 + HTTP 响应首字节 + 响应体完整传完
+  - 只读到响应头不算成功：优选 IP 的典型故障是「握手快、首包快、正文丢包」，
+    只按首字节判定会把这类 IP 排到第一位
+  - 业务路径优先：/cdn-cgi/trace 由 CF 边缘自己应答，不经过 Worker/源站，
+    用它探不出「边缘正常但业务路由 403」的 IP，默认探 /
   - ttfb 取多轮中位数（比平均值抗抖动）
   - 成功率优先于速度排序：一次 8 秒超时比慢 300ms 致命得多
 """
@@ -65,6 +69,15 @@ _CF_BLOCK_SIGNATURES = (
     ("error code: 1003", "边缘拒绝 1003"),
 )
 
+# CF 自己吐的错误页特征。命中说明请求根本没到业务路由（Worker/源站），
+# 而是被边缘挡下了 —— 这种 IP 装进解析后，命中它的请求 100% 失败。
+_CF_ERROR_PAGE_MARKERS = (
+    "<center>cloudflare</center>",
+    "cf-error-details",
+    "/cdn-cgi/images/trace/",
+    "cloudflare ray id",
+)
+
 
 def _detect_cf_block(status: int, headers: Dict[str, str], body: bytes) -> str:
     """识别「CF 边缘拒绝服务这个主机」的响应，返回原因；正常响应返回空串。"""
@@ -74,8 +87,14 @@ def _detect_cf_block(status: int, headers: Dict[str, str], body: bytes) -> str:
     for signature, label in _CF_BLOCK_SIGNATURES:
         if signature in text:
             return label
-    # 正文没读到（或只有 HTML 头）时，退化成看 CF 错误页特征。
-    if headers.get("cf-mitigated") or ("cloudflare" in text and "error" in text):
+    if headers.get("cf-mitigated"):
+        return f"边缘拒绝 {status}"
+    # 例如 172.65.212.5：trace 200 且很快，但业务路径返回 CF 标准 403 错误页。
+    # 旧逻辑要求正文同时出现 cloudflare + error，而该页只有 403 Forbidden，
+    # 于是被当成健康 IP 选进解析。
+    if any(marker in text for marker in _CF_ERROR_PAGE_MARKERS):
+        return f"边缘拒绝 {status}"
+    if "cloudflare" in text and "error" in text:
         return f"边缘拒绝 {status}"
     return ""
 
@@ -246,25 +265,28 @@ async def _probe_once(
     port: int,
     path: str,
     timeout: float,
+    max_body: int = 16384,
+    tls: bool = True,
 ) -> Dict[str, Any]:
-    """对单个 IP 做一次 TLS + HTTP 探测。"""
+    """对单个 IP 做一次 TLS + HTTP 探测。tls=False 仅供自测用明文端口。"""
     started = time.perf_counter()
     writer: Optional[asyncio.StreamWriter] = None
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
         family = socket.AF_INET6 if ":" in ip else socket.AF_INET
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(
+        if tls:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            connect = asyncio.open_connection(
                 host=ip,
                 port=port,
                 ssl=ctx,
                 server_hostname=host,
                 family=family,
-            ),
-            timeout=timeout,
-        )
+            )
+        else:
+            connect = asyncio.open_connection(host=ip, port=port, family=family)
+        reader, writer = await asyncio.wait_for(connect, timeout=timeout)
         handshake_ms = (time.perf_counter() - started) * 1000
 
         request = (
@@ -296,21 +318,73 @@ async def _probe_once(
                 headers[key.strip().lower()] = value.strip()
 
         try:
-            body = await asyncio.wait_for(reader.read(2048), timeout=min(2.0, timeout))
+            body_head = await asyncio.wait_for(reader.read(2048), timeout=min(2.0, timeout))
         except Exception:
-            body = b""
+            body_head = b""
 
-        blocked = _detect_cf_block(status, headers, body)
+        blocked = _detect_cf_block(status, headers, body_head)
         if blocked:
             # 能收到响应但被边缘拒绝服务，等同于不可用；记录原因供页面展示。
             return {
                 "ok": False,
                 "handshake_ms": handshake_ms,
                 "ttfb_ms": ttfb_ms,
-                "colo": _parse_colo(headers, body),
+                "colo": _parse_colo(headers, body_head),
                 "status": status,
                 "blocked": blocked,
                 "error": blocked,
+            }
+
+        if status >= 500:
+            # 5xx 不是 CF 错误页也算不可用：业务路由/源站此刻是坏的，
+            # 装进解析只会把故障平摊到 1/N 的请求上。
+            return {
+                "ok": False,
+                "handshake_ms": handshake_ms,
+                "ttfb_ms": ttfb_ms,
+                "colo": _parse_colo(headers, body_head),
+                "status": status,
+                "blocked": "",
+                "error": f"服务端 {status}",
+            }
+
+        # 读完整响应体。优选 IP 最典型的隐性故障是「首包秒回、正文拉不动」，
+        # 只读到首部就判成功会让这类 IP 拿到很高的排名。
+        body = body_head
+        complete = True
+        expected = 0
+        try:
+            expected = int(headers.get("content-length") or 0)
+        except ValueError:
+            expected = 0
+        if expected and len(body) >= expected:
+            complete = True
+        else:
+            deadline = time.perf_counter() + timeout
+            try:
+                while len(body) < max_body:
+                    remain = deadline - time.perf_counter()
+                    if remain <= 0:
+                        complete = False
+                        break
+                    chunk = await asyncio.wait_for(reader.read(8192), timeout=remain)
+                    if not chunk:
+                        break
+                    body += chunk
+            except asyncio.TimeoutError:
+                complete = False
+            except (ConnectionResetError, OSError):
+                complete = False
+
+        if not complete:
+            return {
+                "ok": False,
+                "handshake_ms": handshake_ms,
+                "ttfb_ms": ttfb_ms,
+                "colo": _parse_colo(headers, body_head),
+                "status": status,
+                "blocked": "",
+                "error": f"响应体未传完（已收 {len(body)} 字节）",
             }
 
         return {
@@ -377,7 +451,7 @@ async def scan(
     concurrency: int = 48,
     timeout: float = 4.0,
     port: int = 443,
-    path: str = "/cdn-cgi/trace",
+    path: str = "/",
     extra_ips: Iterable[str] = (),
     min_success_rate: float = 0.5,
     max_ttfb_ms: float = 3000,

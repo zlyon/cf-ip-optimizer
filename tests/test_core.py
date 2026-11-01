@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -22,9 +23,11 @@ from app.scanner import (  # noqa: E402
     IPStat,
     _detect_cf_block,
     _parse_colo,
+    _probe_once,
     sample_candidates,
     select_qualified,
 )
+from app.runner import _merge_keep  # noqa: E402
 from app.store import Store, hash_password, verify_password  # noqa: E402
 
 
@@ -317,6 +320,26 @@ class TargetSanitizeTest(unittest.TestCase):
         self.assertEqual(data["interval_minutes"], 60)
 
 
+class MergeKeepTest(unittest.TestCase):
+    """更新解析时只替换坏 IP，健康的现任要留住。"""
+
+    def test_healthy_current_is_kept_and_gap_filled(self):
+        self.assertEqual(
+            _merge_keep(["a", "b"], ["c", "d"], 4),
+            ["a", "b", "c", "d"],
+        )
+
+    def test_healthy_current_alone_is_enough(self):
+        # 现任 2 条都健康、目标 2 条 —— 不该被新 IP 顶掉
+        self.assertEqual(_merge_keep(["a", "b"], ["c", "d"], 2), ["a", "b"])
+
+    def test_duplicates_are_not_written_twice(self):
+        self.assertEqual(_merge_keep(["a"], ["a", "b", "c"], 2), ["a", "b"])
+
+    def test_keep_is_at_least_one(self):
+        self.assertEqual(_merge_keep([], ["a"], 0), ["a"])
+
+
 class SchedulerTest(unittest.TestCase):
     def _optimizer(self, store):
         from app.runner import Optimizer
@@ -476,6 +499,93 @@ class EdgeRestrictionTest(unittest.TestCase):
             [slow, quick, flaky], key=lambda s: (-s.success_rate, s.ttfb_ms or 9e9)
         )
         self.assertEqual(select_qualified(ranked, min_success_rate=0.5, keep=3), ["2.2.2.2", "1.1.1.1", "3.3.3.3"])
+
+
+class CfErrorPageTest(unittest.TestCase):
+    """CF 自己吐的错误页 = 该 IP 上没有业务路由，不能当健康 IP。
+
+    真实故障：172.65.212.5 探 /cdn-cgi/trace 时 200 且 287ms 排第二，但真正
+    去拉 GitHub raw 时 8/8 全部返回这个 403 页，github 反代因此一半请求失败。
+    """
+
+    CF_ERROR_PAGE = (
+        b"<html>\r\n<head><title>403 Forbidden</title></head>\r\n<body>\r\n"
+        b"<center><h1>403 Forbidden</h1></center>\r\n<hr><center>cloudflare</center>\r\n"
+        b"</body>\r\n</html>\r\n"
+    )
+
+    def test_plain_cloudflare_403_page_is_blocked(self):
+        self.assertTrue(_detect_cf_block(403, {}, self.CF_ERROR_PAGE))
+
+    def test_worker_business_400_is_not_blocked(self):
+        # proxy.3481324.xyz 根路径的正常响应就是 400「用法：/...」，不能判死
+        self.assertEqual(_detect_cf_block(400, {}, "用法：/<完整的 GitHub raw URL>".encode()), "")
+
+    def test_worker_302_redirect_is_not_blocked(self):
+        self.assertEqual(_detect_cf_block(302, {}, b""), "")
+
+    def test_cf_mitigated_header_is_blocked(self):
+        self.assertTrue(_detect_cf_block(403, {"cf-mitigated": "challenge"}, b""))
+
+
+class ProbeIntegrityTest(unittest.IsolatedAsyncioTestCase):
+    """探测必须走到「响应体传完」，只收到首部不算成功。"""
+
+    async def _serve(self, payload: bytes, keep_open: float = 0.0):
+        """起一个一次性明文 HTTP 服务，返回端口。"""
+
+        async def handler(reader, writer):
+            try:
+                await reader.readuntil(b"\r\n\r\n")
+                writer.write(payload)
+                await writer.drain()
+                if keep_open:
+                    # 故意不关连接：模拟「首部到了、正文拉不动」
+                    await asyncio.sleep(keep_open)
+            except Exception:
+                pass
+            finally:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        self.addAsyncCleanup(server.close)
+        return port
+
+    async def test_complete_body_counts_as_ok(self):
+        port = await self._serve(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello"
+        )
+        result = await _probe_once("127.0.0.1", "example.com", port, "/", 2.0, tls=False)
+        self.assertTrue(result["ok"], result)
+
+    async def test_short_body_is_not_ok(self):
+        # 声明 100 字节只给 5 字节，然后挂着不关连接
+        port = await self._serve(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nhello",
+            keep_open=3.0,
+        )
+        result = await _probe_once("127.0.0.1", "example.com", port, "/", 1.0, tls=False)
+        self.assertFalse(result["ok"])
+        self.assertIn("未传完", result["error"])
+
+    async def test_5xx_is_not_ok(self):
+        port = await self._serve(
+            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 2\r\nConnection: close\r\n\r\nno"
+        )
+        result = await _probe_once("127.0.0.1", "example.com", port, "/", 2.0, tls=False)
+        self.assertFalse(result["ok"])
+        self.assertIn("502", result["error"])
+
+    async def test_4xx_business_response_still_ok(self):
+        port = await self._serve(
+            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 6\r\nConnection: close\r\n\r\nusage:"
+        )
+        result = await _probe_once("127.0.0.1", "example.com", port, "/", 2.0, tls=False)
+        self.assertTrue(result["ok"], result)
 
 
 if __name__ == "__main__":

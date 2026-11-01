@@ -19,11 +19,17 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+# 探测路径：默认打业务根路径，让请求真正经过 Worker / 源站。
+# 早期版本默认 /cdn-cgi/trace，该端点由 CF 边缘自己应答，探不出
+# 「边缘正常但业务路由 403」的 IP（例如 172.65.212.5 对 GitHub 反代全 403）。
+DEFAULT_PROBE_PATH = "/"
+LEGACY_PROBE_PATH = "/cdn-cgi/trace"
+
 DEFAULT_SETTINGS: Dict[str, Any] = {
     # --- Cloudflare（全局共用，多个域名块共享同一个 Token）---
     "cf_token": "",
     # --- 公共探测参数（各域名块默认继承，个别可在块内覆盖）---
-    "probe_path": "/cdn-cgi/trace",
+    "probe_path": DEFAULT_PROBE_PATH,
     "probe_port": 443,
     "candidate_count": 200,
     "sample_rounds": 2,
@@ -163,6 +169,7 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._migrate_legacy_target()
+        self._migrate_probe_path()
 
     def close(self) -> None:
         with self._lock:
@@ -238,6 +245,31 @@ class Store:
                 target[key] = raw[key]
         target["label"] = str(raw.get("record_name") or "迁移的域名")
         self.upsert_target(target)
+
+    def _migrate_probe_path(self) -> None:
+        """把旧的默认探测路径 /cdn-cgi/trace 换成业务路径 /。
+
+        该端点由 CF 边缘自己应答，不经过 Worker/源站，用它当探针会漏掉
+        「边缘正常、业务路由 403」的 IP。只在用户没改过默认值时才迁移。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM settings WHERE id = 1"
+            ).fetchone()
+            if not row:
+                return
+            try:
+                payload = json.loads(row["payload"])
+            except json.JSONDecodeError:
+                return
+            if payload.get("probe_path") != LEGACY_PROBE_PATH:
+                return
+            payload["probe_path"] = DEFAULT_PROBE_PATH
+            self._conn.execute(
+                "UPDATE settings SET payload = ?, updated_at = ? WHERE id = 1",
+                (json.dumps(payload, ensure_ascii=False), time.time()),
+            )
+            self._conn.commit()
 
     # ---------------- settings ----------------
 

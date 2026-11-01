@@ -261,7 +261,7 @@
         <div class="group">
           <div class="group-title">公共探测参数（域名块未覆盖时使用）</div>
           <div class="fields">
-            <div><label>探测路径</label><input type="text" id="gf_probe_path" data-gf="probe_path" placeholder="/cdn-cgi/trace" /></div>
+            <div><label>探测路径</label><input type="text" id="gf_probe_path" data-gf="probe_path" placeholder="/" /></div>
             <div><label>探测端口</label><input type="number" id="gf_probe_port" data-gf="probe_port" min="1" max="65535" /></div>
             <div><label>候选 IP 数量</label><input type="number" id="gf_candidate_count" data-gf="candidate_count" min="10" max="5000" /></div>
             <div><label>每 IP 采样轮数</label><input type="number" id="gf_sample_rounds" data-gf="sample_rounds" min="1" max="6" /></div>
@@ -910,7 +910,7 @@ function renderResults() {
     if (chosen.has(r.ip)) tags.push('<span class="badge ok">入选</span>');
     if (used.has(r.ip)) tags.push('<span class="badge used">当前解析</span>');
     if (r.blocked) tags.push(`<span class="badge bad" title="Cloudflare 边缘拒绝为这个主机服务，写进解析会导致部分请求必失败">${escapeHtml(r.blocked)}</span>`);
-    else if (!r.ok) tags.push('<span class="badge bad">不可用</span>');
+    else if (!r.ok) tags.push(`<span class="badge bad" title="${escapeHtml(r.last_error || '不可用')}">不可用</span>`);
     const colo = r.colo && r.colo !== '' ? r.colo : '—';
     return `<tr>
       <td>${i + 1}</td>

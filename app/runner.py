@@ -12,11 +12,11 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from .cloudflare import CloudflareClient, CloudflareError
 from .scanner import ScanReport, scan
-from .store import Store
+from .store import DEFAULT_PROBE_PATH, Store
 
 LOGGER = logging.getLogger("cfip")
 
@@ -219,6 +219,8 @@ class Optimizer:
 
         record_type = str(target.get("record_type") or "A").upper()
         ip_version = 6 if record_type == "AAAA" else 4
+        zone_name = (target.get("zone_name") or "").strip()
+        record_name = (target.get("record_name") or "").strip()
 
         state.scanning = True
         state.progress = {"done": 0, "total": 0, "stage": "准备候选 IP"}
@@ -233,6 +235,35 @@ class Optimizer:
                 "stage": "探测中",
             }
 
+        # 扫描前先把现有解析读出来，把现任 IP 塞进候选池。
+        # 候选池是在 CF 全网段里随机抽的，现任那几条被抽中的概率几乎为零；
+        # 不强制并入的话 _decide_and_apply 里永远统计出「现任可用 IP 0 个」，
+        # 于是每轮都无条件全量替换，哪怕现任个个健康。
+        preloaded: Optional[Tuple[str, List[Dict[str, Any]]]] = None
+        current_ips: List[str] = []
+        if zone_name and record_name and settings.get("cf_token"):
+            try:
+                client = CloudflareClient(str(settings["cf_token"]))
+                zone_id = await asyncio.to_thread(client.find_zone_id, zone_name)
+                records = await asyncio.to_thread(
+                    client.list_records, zone_id, record_name, record_type
+                )
+                current_ips = [str(r.get("content")) for r in records]
+                preloaded = (zone_id, records)
+            except CloudflareError as error:
+                LOGGER.warning(
+                    "%s 读取现有解析失败（本次仍会扫描，但现任 IP 不参与评级）：%s",
+                    label,
+                    error,
+                )
+
+        candidates_extra = _split_ips(target.get("extra_ips") or "")
+        for ip in current_ips:
+            if ip not in candidates_extra:
+                candidates_extra.append(ip)
+        if current_ips:
+            LOGGER.info("%s 现任解析 %d 条，已并入候选参与同轮测试", label, len(current_ips))
+
         try:
             report = await scan(
                 host=host,
@@ -242,8 +273,8 @@ class Optimizer:
                 concurrency=int(settings.get("concurrency") or 48),
                 timeout=float(settings.get("timeout") or 4.0),
                 port=int(settings.get("probe_port") or 443),
-                path=str(target.get("probe_path") or settings.get("probe_path") or "/cdn-cgi/trace"),
-                extra_ips=_split_ips(target.get("extra_ips") or ""),
+                path=str(target.get("probe_path") or settings.get("probe_path") or DEFAULT_PROBE_PATH),
+                extra_ips=candidates_extra,
                 min_success_rate=float(settings.get("min_success_rate") or 0.5),
                 max_ttfb_ms=float(settings.get("max_ttfb_ms") or 3000),
                 keep=int(target.get("keep_count") or 2),
@@ -279,6 +310,7 @@ class Optimizer:
             target,
             report,
             apply if apply is not None else bool(target.get("auto_update")),
+            preloaded=preloaded,
         )
 
         state.last_report = report.to_dict()
@@ -332,6 +364,7 @@ class Optimizer:
         target: Dict[str, Any],
         report: ScanReport,
         apply: bool,
+        preloaded: Optional[Tuple[str, List[Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
         label = _label(target)
         record_name = (target.get("record_name") or "").strip()
@@ -350,6 +383,9 @@ class Optimizer:
             "target_id": target["id"],
             "target_label": label,
         }
+        if preloaded is not None:
+            # dry-run 也要能显示现任，否则页面看不出「本轮测的到是不是正在用的那几条」
+            decision["current"] = [str(r.get("content")) for r in preloaded[1]]
 
         if not report.chosen:
             decision["reason"] = "本轮没有达标 IP，保留现有解析不动"
@@ -370,16 +406,21 @@ class Optimizer:
         client = CloudflareClient(str(settings.get("cf_token")))
         state = self.state_for(target["id"])
 
-        try:
-            zone_id = await asyncio.to_thread(client.find_zone_id, zone_name)
-            records = await asyncio.to_thread(
-                client.list_records, zone_id, record_name, record_type
-            )
-        except CloudflareError as error:
-            decision["error"] = str(error)
-            decision["reason"] = f"读取现有解析失败：{error}"
-            LOGGER.error("%s：%s", label, decision["reason"])
-            return decision
+        if preloaded is not None:
+            # 复用扫描前那次读取：两次请求之间解析可能被别处改动，
+            # 用同一份快照才能保证「评级的对象」和「实际改的对象」一致。
+            zone_id, records = preloaded
+        else:
+            try:
+                zone_id = await asyncio.to_thread(client.find_zone_id, zone_name)
+                records = await asyncio.to_thread(
+                    client.list_records, zone_id, record_name, record_type
+                )
+            except CloudflareError as error:
+                decision["error"] = str(error)
+                decision["reason"] = f"读取现有解析失败：{error}"
+                LOGGER.error("%s：%s", label, decision["reason"])
+                return decision
 
         current_ips = [str(r.get("content")) for r in records]
         state.dns_records = [_slim_record(r) for r in records]
@@ -392,14 +433,31 @@ class Optimizer:
         def stat_of(ip: str):
             return stat_by_ip.get(ip)
 
-        # 现任是否健康：参与本轮测试且成功率达标
+        # 现任是否健康：参与本轮测试且成功率达标（被边缘拒绝的一律不算）
         healthy_current = [
             ip
             for ip in current_ips
-            if stat_of(ip) is not None and stat_of(ip).success_rate >= min_rate
+            if stat_of(ip) is not None
+            and not stat_of(ip).blocked
+            and stat_of(ip).success_rate >= min_rate
         ]
+        unhealthy_current = [ip for ip in current_ips if ip not in healthy_current]
+        healthy_ranked = sorted(
+            healthy_current, key=lambda ip: stat_of(ip).ttfb_ms if stat_of(ip) else 9e9
+        )
+        # 只换该换的：健康的现任优先留住，缺的名额用本轮最优补齐。
+        # 这样一次更新最多替换坏 IP，不会因为排名微调就把整组记录翻一遍。
+        plan = _merge_keep(healthy_ranked, want, keep)
+
         need = False
-        if len(healthy_current) < min(keep, len(want)):
+        if unhealthy_current:
+            need = True
+            rejected = [ip for ip in unhealthy_current if stat_of(ip) and stat_of(ip).blocked]
+            detail = f"，其中 {len(rejected)} 个被边缘拒绝" if rejected else ""
+            decision["reason"] = (
+                f"现任有 {len(unhealthy_current)} 个 IP 本轮不达标{detail}，按需替换"
+            )
+        elif len(healthy_current) < min(keep, len(want)):
             need = True
             decision["reason"] = (
                 f"现任可用 IP 只有 {len(healthy_current)} 个，低于目标 {min(keep, len(want))}"
@@ -430,13 +488,16 @@ class Optimizer:
             LOGGER.info("%s：%s", label, decision["reason"])
             return decision
 
+        # 有坏 IP 时按「健康现任 + 最优补齐」写；纯粹追求速度时直接换成提速方案。
+        final_ips = plan if unhealthy_current else want
+
         try:
             summary = await asyncio.to_thread(
                 client.sync_records,
                 zone_name=zone_name,
                 name=record_name,
                 record_type=record_type,
-                ips=want,
+                ips=final_ips,
                 ttl=int(target.get("record_ttl") or 300),
                 proxied=bool(target.get("record_proxied")),
             )
@@ -449,6 +510,7 @@ class Optimizer:
         decision.update(
             {
                 "applied": True,
+                "applied_ips": final_ips,
                 "summary": summary,
                 "final": summary.get("final"),
             }
@@ -558,6 +620,22 @@ def _slim_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "proxied": record.get("proxied"),
         "comment": record.get("comment"),
     }
+
+
+def _merge_keep(healthy: List[str], want: List[str], keep: int) -> List[str]:
+    """健康的现任优先占用名额，剩下的用本轮最优补齐。
+
+    只替换该替换的 IP：一处失败不应导致整组记录被翻新，
+    那样每轮都会抖动一次 DNS。
+    """
+    limit = max(1, keep)
+    merged: List[str] = []
+    for ip in list(healthy) + list(want):
+        if len(merged) >= limit:
+            break
+        if ip not in merged:
+            merged.append(ip)
+    return merged
 
 
 def _split_ips(raw: str) -> List[str]:

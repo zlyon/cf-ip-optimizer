@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .cloudflare import CloudflareClient, CloudflareError
 from .runner import Optimizer
-from .store import DEFAULT_TARGET, Store, verify_password
+from .store import DEFAULT_PROBE_PATH, DEFAULT_TARGET, Store, verify_password
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = os.getenv("DATA_DIR", "/data")
@@ -146,7 +146,7 @@ def sanitize(incoming: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any
     if token and not _masked(token):
         data["cf_token"] = token
 
-    path = str(incoming.get("probe_path", current.get("probe_path", "/cdn-cgi/trace"))).strip()
+    path = str(incoming.get("probe_path", current.get("probe_path", DEFAULT_PROBE_PATH))).strip()
     data["probe_path"] = path if path.startswith("/") else "/" + path
     data["probe_port"] = _clamp(incoming.get("probe_port"), 443, 1, 65535)
     data["candidate_count"] = _clamp(incoming.get("candidate_count"), 200, 10, 5000)
