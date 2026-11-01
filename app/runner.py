@@ -256,14 +256,23 @@ class Optimizer:
             return {"ok": False, "target_id": target_id, "error": state.last_error}
 
         state.progress = {"done": 1, "total": 1, "stage": "整理结果"}
+        blocked = report.blocked
         LOGGER.info(
-            "%s 扫描完成：测试 %d 个候选，可用 %d 个，耗时 %.1fs，入选 %s",
+            "%s 扫描完成：测试 %d 个候选，可用 %d 个，边缘拒绝 %d 个，耗时 %.1fs，入选 %s",
             label,
             report.tested,
             len(report.alive),
+            len(blocked),
             report.duration,
             ", ".join(report.chosen) or "无",
         )
+        if blocked:
+            LOGGER.warning(
+                "%s 有 %d 个 IP 被 Cloudflare 边缘拒绝（1034/1010），已排除：%s",
+                label,
+                len(blocked),
+                ", ".join(f"{r.ip}({r.blocked})" for r in blocked[:6]),
+            )
 
         decision = await self._decide_and_apply(
             settings,

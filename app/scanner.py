@@ -51,6 +51,34 @@ CF_IPV6_SEGMENTS: Sequence[str] = (
 
 USER_AGENT = "cf-ip-optimizer/1.0"
 
+# Cloudflare 并非所有 anycast IP 都能用来承载「灰云记录」的回源：
+# 落在受限 IP 上时边缘直接返回 403 + "error code: 1034"（Edge IP Restricted）。
+#
+# 这类 IP 的握手往往比正常 IP 还快（0.4s 就吐完错误页），如果只按「有没有收到
+# 响应首字节」判定成功，它会被排到第一位并写进解析——之后命中它的请求全部失败，
+# 且因为同一记录里还有正常 IP，表现出来就是「时好时坏」，极难定位。
+# 所以必须按状态码 + CF 错误标记判死，而不是只看通不通。
+_CF_BLOCK_SIGNATURES = (
+    ("error code: 1034", "边缘拒绝 1034"),
+    ("error code: 1010", "边缘拦截 1010"),
+    ("edge ip restricted", "边缘拒绝 1034"),
+    ("error code: 1003", "边缘拒绝 1003"),
+)
+
+
+def _detect_cf_block(status: int, headers: Dict[str, str], body: bytes) -> str:
+    """识别「CF 边缘拒绝服务这个主机」的响应，返回原因；正常响应返回空串。"""
+    if status not in (403, 451):
+        return ""
+    text = body.decode("utf-8", "replace").lower()
+    for signature, label in _CF_BLOCK_SIGNATURES:
+        if signature in text:
+            return label
+    # 正文没读到（或只有 HTML 头）时，退化成看 CF 错误页特征。
+    if headers.get("cf-mitigated") or ("cloudflare" in text and "error" in text):
+        return f"边缘拒绝 {status}"
+    return ""
+
 
 @dataclass
 class IPStat:
@@ -61,6 +89,8 @@ class IPStat:
     handshake_samples: List[float] = field(default_factory=list)
     colo: str = ""
     last_error: str = ""
+    status: int = 0
+    blocked: str = ""  # 非空表示被 CF 边缘拒绝，绝不能写进解析
 
     @property
     def success_rate(self) -> float:
@@ -83,6 +113,8 @@ class IPStat:
             "ttfb_ms": round(self.ttfb_ms, 1),
             "handshake_ms": round(self.handshake_ms, 1),
             "colo": self.colo,
+            "status": self.status,
+            "blocked": self.blocked,
             "last_error": self.last_error,
         }
 
@@ -104,6 +136,10 @@ class ScanReport:
     def alive(self) -> List[IPStat]:
         return [r for r in self.results if r.ok > 0]
 
+    @property
+    def blocked(self) -> List[IPStat]:
+        return [r for r in self.results if r.blocked]
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "started_at": self.started_at,
@@ -111,6 +147,7 @@ class ScanReport:
             "duration": round(self.duration, 1),
             "tested": self.tested,
             "alive": len(self.alive),
+            "blocked": len(self.blocked),
             "chosen": self.chosen,
             "results": [r.to_dict() for r in self.results],
             "errors": self.errors,
@@ -263,12 +300,26 @@ async def _probe_once(
         except Exception:
             body = b""
 
+        blocked = _detect_cf_block(status, headers, body)
+        if blocked:
+            # 能收到响应但被边缘拒绝服务，等同于不可用；记录原因供页面展示。
+            return {
+                "ok": False,
+                "handshake_ms": handshake_ms,
+                "ttfb_ms": ttfb_ms,
+                "colo": _parse_colo(headers, body),
+                "status": status,
+                "blocked": blocked,
+                "error": blocked,
+            }
+
         return {
             "ok": True,
             "handshake_ms": handshake_ms,
             "ttfb_ms": ttfb_ms,
             "colo": _parse_colo(headers, body),
             "status": status,
+            "blocked": "",
             "error": "",
         }
     except asyncio.TimeoutError:
@@ -292,6 +343,29 @@ async def _probe_once(
                 await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
             except Exception:
                 pass
+
+
+def select_qualified(
+    results: Sequence[IPStat],
+    *,
+    min_success_rate: float = 0.5,
+    max_ttfb_ms: float = 3000,
+    keep: int = 2,
+) -> List[str]:
+    """按「成功率优先、延迟次之」挑出可写进解析的 IP。
+
+    被 CF 边缘拒绝的 IP 即使收到了响应也不算数：它的握手可能很快，但装上之后
+    命中它的请求会 100% 失败。
+    """
+    qualified = [
+        s
+        for s in results
+        if s.ok > 0
+        and not s.blocked
+        and s.success_rate >= min_success_rate
+        and (max_ttfb_ms <= 0 or s.ttfb_ms <= max_ttfb_ms)
+    ]
+    return [s.ip for s in qualified[: max(1, keep)]]
 
 
 async def scan(
@@ -325,8 +399,15 @@ async def scan(
             result = await _probe_once(ip, host, port, path, timeout)
         stat = stats[ip]
         stat.total += 1
-        if result["ok"]:
+        if result.get("blocked"):
+            # 被边缘拒绝的 IP 一旦出现就永久标记：这是 IP 属性，不是抖动，
+            # 换个时间重试同样是 1034，留在候选里只会污染排序。
+            stat.blocked = result["blocked"]
+            stat.status = int(result.get("status") or 0)
+            stat.last_error = result["blocked"]
+        elif result["ok"] and not stat.blocked:
             stat.ok += 1
+            stat.status = int(result.get("status") or 0)
             stat.ttfb_samples.append(result["ttfb_ms"])
             stat.handshake_samples.append(result["handshake_ms"])
             if not stat.colo and result.get("colo"):
@@ -347,14 +428,12 @@ async def scan(
         key=lambda s: (-s.success_rate, s.ttfb_ms or 9e9),
     )
 
-    qualified = [
-        s
-        for s in results
-        if s.ok > 0
-        and s.success_rate >= min_success_rate
-        and (max_ttfb_ms <= 0 or s.ttfb_ms <= max_ttfb_ms)
-    ]
-    chosen = [s.ip for s in qualified[: max(1, keep)]]
+    chosen = select_qualified(
+        results,
+        min_success_rate=min_success_rate,
+        max_ttfb_ms=max_ttfb_ms,
+        keep=keep,
+    )
 
     return ScanReport(
         started_at=started_at,

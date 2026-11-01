@@ -909,7 +909,8 @@ function renderResults() {
     const tags = [];
     if (chosen.has(r.ip)) tags.push('<span class="badge ok">入选</span>');
     if (used.has(r.ip)) tags.push('<span class="badge used">当前解析</span>');
-    if (!r.ok) tags.push('<span class="badge bad">不可用</span>');
+    if (r.blocked) tags.push(`<span class="badge bad" title="Cloudflare 边缘拒绝为这个主机服务，写进解析会导致部分请求必失败">${escapeHtml(r.blocked)}</span>`);
+    else if (!r.ok) tags.push('<span class="badge bad">不可用</span>');
     const colo = r.colo && r.colo !== '' ? r.colo : '—';
     return `<tr>
       <td>${i + 1}</td>

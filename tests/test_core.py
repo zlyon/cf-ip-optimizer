@@ -18,7 +18,13 @@ os.environ.setdefault("DATA_DIR", _TMP_DIR)
 os.environ.setdefault("DB_PATH", os.path.join(_TMP_DIR, "app.db"))
 
 from app.cloudflare import CloudflareClient  # noqa: E402
-from app.scanner import _parse_colo, sample_candidates  # noqa: E402
+from app.scanner import (  # noqa: E402
+    IPStat,
+    _detect_cf_block,
+    _parse_colo,
+    sample_candidates,
+    select_qualified,
+)
 from app.store import Store, hash_password, verify_password  # noqa: E402
 
 
@@ -425,6 +431,51 @@ class EntrypointSmokeTest(unittest.TestCase):
         )
         self.assertIn("ENTRYPOINT_RAN", result.stdout)
         self.assertEqual(result.returncode, 0)
+
+
+class EdgeRestrictionTest(unittest.TestCase):
+    """CF 边缘拒绝（1034/1010）不能被当成「可用 IP」。
+
+    真实故障：tgapi.225287.xyz 有 4 条 A 记录，其中 108.162.198.181 恒定返回
+    403 error code: 1034，而且响应只有 0.46s，比正常 IP 还快，于是被优选器
+    排到前面写进了解析，表现为「Telegram 请求时好时坏」。
+    """
+
+    def test_detects_json_1034_body(self):
+        body = (
+            b'{"type":"https://developers.cloudflare.com/support/troubleshooting/'
+            b'http-status-codes/cloudflare-1xxx-errors/error-1034/","title":'
+            b'"Error 1034: Edge IP Restricted","status":403}'
+        )
+        self.assertTrue(_detect_cf_block(403, {}, body))
+
+    def test_detects_plain_1010_body(self):
+        self.assertTrue(_detect_cf_block(403, {}, b"error code: 1010"))
+
+    def test_normal_and_404_responses_are_not_blocked(self):
+        self.assertEqual(_detect_cf_block(200, {}, b"fl=1f2;h=104.19.70.113"), "")
+        self.assertEqual(_detect_cf_block(404, {}, b"not found"), "")
+        self.assertEqual(_detect_cf_block(302, {}, b""), "")
+
+    def test_blocked_ip_is_never_selected_even_if_fast(self):
+        fast_but_blocked = IPStat(ip="108.162.198.181", ok=0, total=2, blocked="边缘拒绝 1034")
+        fast_but_blocked.ttfb_samples = [180.0]
+        healthy = IPStat(ip="104.19.70.113", ok=2, total=2)
+        healthy.ttfb_samples = [700.0, 720.0]
+        chosen = select_qualified([fast_but_blocked, healthy], min_success_rate=0.5, keep=2)
+        self.assertEqual(chosen, ["104.19.70.113"])
+
+    def test_healthy_ips_still_ranked_by_success_then_latency(self):
+        slow = IPStat(ip="1.1.1.1", ok=2, total=2)
+        slow.ttfb_samples = [900.0, 900.0]
+        quick = IPStat(ip="2.2.2.2", ok=2, total=2)
+        quick.ttfb_samples = [300.0, 300.0]
+        flaky = IPStat(ip="3.3.3.3", ok=1, total=2)
+        flaky.ttfb_samples = [400.0]
+        ranked = sorted(
+            [slow, quick, flaky], key=lambda s: (-s.success_rate, s.ttfb_ms or 9e9)
+        )
+        self.assertEqual(select_qualified(ranked, min_success_rate=0.5, keep=3), ["2.2.2.2", "1.1.1.1", "3.3.3.3"])
 
 
 if __name__ == "__main__":
