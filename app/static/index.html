@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cloudflare 优选 IP 自动更新</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#111822; --panel-2:#0e141d; --line:#1e2a38;
+    --text:#e6eef7; --muted:#8398ad; --accent:#2dd4bf; --accent2:#38bdf8;
+    --ok:#34d399; --warn:#fbbf24; --danger:#f87171; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.55}
+  body{min-height:100vh;
+    background-image:radial-gradient(900px 500px at 12% -10%,rgba(45,212,191,.10),transparent 60%),
+                     radial-gradient(800px 420px at 92% 0%,rgba(56,189,248,.09),transparent 55%);}
+  a{color:var(--accent2);text-decoration:none}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  .hidden{display:none !important}
+
+  header{display:flex;align-items:center;gap:14px;padding:16px 22px;
+    border-bottom:1px solid var(--line);background:rgba(10,14,20,.72);backdrop-filter:blur(10px);
+    position:sticky;top:0;z-index:20}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:.2px}
+  .logo .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 12px rgba(45,212,191,.8)}
+  .tag{font-size:11.5px;color:var(--muted);border:1px solid var(--line);
+    padding:2px 8px;border-radius:999px}
+  .spacer{flex:1}
+  .status{display:flex;gap:10px;align-items:center;font-size:12.5px;color:var(--muted)}
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .pulse.busy{background:var(--warn);animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+  main{max-width:1220px;margin:0 auto;padding:22px 22px 60px}
+
+  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);
+    border-radius:var(--radius);padding:15px 16px;position:relative;overflow:hidden}
+  .card h3{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.6px;text-transform:uppercase}
+  .card .big{font-size:19px;font-weight:650;letter-spacing:.3px}
+  .card .sub{font-size:12px;color:var(--muted);margin-top:4px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-family:ui-monospace,monospace;font-size:12px;background:rgba(45,212,191,.10);
+    color:#8ff2e2;border:1px solid rgba(45,212,191,.28);padding:2px 8px;border-radius:7px}
+  .chip.bad{background:rgba(248,113,113,.1);color:#fca5a5;border-color:rgba(248,113,113,.3)}
+
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;align-items:center}
+  button{font:inherit;cursor:pointer;border-radius:10px;padding:9px 16px;border:1px solid var(--line);
+    background:#16202c;color:var(--text);transition:.15s;font-weight:550}
+  button:hover:not(:disabled){border-color:#2f4459;background:#1b2735;transform:translateY(-1px)}
+  button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  button.primary{background:linear-gradient(180deg,#22c9b8,#149e93);border-color:#1ab3a5;color:#04120f}
+  button.primary:hover:not(:disabled){filter:brightness(1.07)}
+  button.ghost{background:transparent}
+  button.danger{border-color:rgba(248,113,113,.35);color:#fca5a5;background:rgba(248,113,113,.06)}
+
+  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);
+    border-radius:var(--radius);padding:16px}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .panel-head h2{margin:0;font-size:14px;font-weight:650;letter-spacing:.3px}
+  .panel-head .hint{font-size:12px;color:var(--muted)}
+
+  table{width:100%;border-collapse:collapse;font-size:12.8px}
+  #resultWrap{max-height:470px;overflow:auto;margin:0 -6px;padding:0 6px}
+  #resultWrap thead th{position:sticky;top:0;background:#101821;z-index:1;
+    box-shadow:inset 0 -1px 0 rgba(30,42,56,.9)}
+  #resultWrap::-webkit-scrollbar{width:8px}
+  #resultWrap::-webkit-scrollbar-thumb{background:#243244;border-radius:4px}
+  #resultWrap::-webkit-scrollbar-track{background:transparent}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid rgba(30,42,56,.7)}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;letter-spacing:.5px;text-transform:uppercase}
+  tbody tr:hover{background:rgba(56,189,248,.05)}
+  td.mono{font-family:ui-monospace,monospace}
+  .bar{height:4px;border-radius:3px;background:#1b2532;overflow:hidden;margin-top:5px}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .badge{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .badge.ok{color:#6ee7b7;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+  .badge.bad{color:#fca5a5;border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.07)}
+  .badge.used{color:#7dd3fc;border-color:rgba(56,189,248,.35);background:rgba(56,189,248,.08)}
+  .empty{padding:22px 8px;text-align:center;color:var(--muted);font-size:12.5px}
+
+  .progress{margin-bottom:16px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:13px 16px}
+  .progress .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+  .progress .track{height:6px;background:#1b2532;border-radius:4px;overflow:hidden}
+  .progress .track > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .3s}
+
+  form .group{margin-bottom:18px}
+  form .group-title{font-size:11.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);
+    margin-bottom:10px;padding-bottom:6px;border-bottom:1px dashed var(--line)}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+  .fields.one{grid-template-columns:1fr}
+  @media(max-width:640px){.fields{grid-template-columns:1fr}}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=password],input[type=number],textarea,select{
+    width:100%;background:#0b121a;border:1px solid var(--line);border-radius:9px;
+    color:var(--text);padding:8px 10px;font:inherit;font-size:13px;outline:none;transition:.15s}
+  input:focus,textarea:focus,select:focus{border-color:#2f6a72;box-shadow:0 0 0 3px rgba(45,212,191,.10)}
+  textarea{resize:vertical;min-height:64px;font-family:ui-monospace,monospace;font-size:12px}
+  .switch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin-top:6px}
+  .switch input{width:16px;height:16px;accent-color:var(--accent)}
+  .note{font-size:11.8px;color:var(--muted);margin-top:6px}
+
+  .logs{max-height:260px;overflow:auto;font-family:ui-monospace,monospace;font-size:12px;
+    background:#080c11;border:1px solid var(--line);border-radius:10px;padding:10px 12px;line-height:1.7}
+  .logs div{white-space:pre-wrap;word-break:break-all;color:#9db0c3}
+  .logs .t{color:#4d6377;margin-right:8px}
+  .logs .warn{color:var(--warn)}
+  .logs .error{color:var(--danger)}
+  .logs .info{color:#9db0c3}
+
+  .toast{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:50}
+  .toast div{background:#16202c;border:1px solid var(--line);border-left:3px solid var(--accent);
+    padding:10px 14px;border-radius:10px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.45);
+    animation:slideIn .2s ease}
+  .toast div.err{border-left-color:var(--danger)}
+  @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  .login-layer{position:fixed;inset:0;background:rgba(6,9,13,.86);backdrop-filter:blur(8px);
+    display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .login-card{width:100%;max-width:380px;background:linear-gradient(180deg,#121a25,#0d141c);
+    border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  .login-card h1{margin:0 0 6px;font-size:17px;font-weight:650}
+  .login-card p{margin:0 0 18px;color:var(--muted);font-size:12.5px}
+  .login-card button{width:100%;margin-top:12px}
+</style>
+</head>
+<body>
+
+<div id="loginLayer" class="login-layer hidden">
+  <div class="login-card">
+    <h1 id="loginTitle">登录</h1>
+    <p id="loginHint">输入管理密码以继续</p>
+    <form id="loginForm">
+      <label id="pwdLabel">管理密码</label>
+      <input id="pwdInput" type="password" autocomplete="current-password" placeholder="至少 8 位" />
+      <button class="primary" type="submit" id="loginBtn">进入</button>
+    </form>
+  </div>
+</div>
+
+<header>
+  <div class="logo"><span class="dot"></span> Cloudflare 优选 IP</div>
+  <span class="tag" id="verTag">v dev</span>
+  <div class="spacer"></div>
+  <div class="status">
+    <span class="pulse" id="pulseDot"></span>
+    <span id="statusText">空闲</span>
+    <span id="nextRun"></span>
+  </div>
+  <button class="ghost" id="logoutBtn" style="padding:6px 12px">退出</button>
+</header>
+
+<main id="app" class="hidden">
+  <section class="overview">
+    <div class="card">
+      <h3>当前解析</h3>
+      <div class="big" id="curName">—</div>
+      <div class="chips" id="curIps"><span class="sub">尚未读取</span></div>
+      <div class="sub" id="curMeta"></div>
+    </div>
+    <div class="card">
+      <h3>最近扫描</h3>
+      <div class="big" id="lastScanTime">—</div>
+      <div class="sub" id="lastScanMeta">还没有扫描记录</div>
+    </div>
+    <div class="card">
+      <h3>可用 / 候选</h3>
+      <div class="big" id="aliveCount">—</div>
+      <div class="bar"><i id="aliveBar" style="width:0"></i></div>
+      <div class="sub" id="aliveMeta"></div>
+    </div>
+    <div class="card">
+      <h3>下次自动扫描</h3>
+      <div class="big" id="nextScan">—</div>
+      <div class="sub" id="intervalMeta"></div>
+      <div class="chips" id="chosenChips"></div>
+    </div>
+  </section>
+
+  <section class="toolbar">
+    <button class="primary" id="scanApplyBtn">立即扫描并更新解析</button>
+    <button id="scanDryBtn">只扫描不更新</button>
+    <button class="ghost" id="refreshDnsBtn">刷新解析状态</button>
+  </section>
+
+  <section class="progress hidden" id="progressBox">
+    <div class="row"><span id="progressStage">准备中</span><span id="progressText">0 / 0</span></div>
+    <div class="track"><i id="progressBar"></i></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>扫描结果</h2>
+        <span class="hint" id="resultHint">按成功率与延迟排序</span>
+      </div>
+      <div id="resultWrap">
+        <div class="empty">还没有扫描结果，点上面的按钮开始。</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>设置</h2>
+        <span class="hint">保存后立即生效</span>
+      </div>
+      <form id="settingsForm" onsubmit="return false">
+        <div class="group">
+          <div class="group-title">Cloudflare</div>
+          <div class="fields one">
+            <div>
+              <label>API Token（Zone.DNS 编辑权限）</label>
+              <input type="text" id="cf_token" placeholder="粘贴 Token" autocomplete="off" />
+              <div class="note">需要 Zone → DNS → Edit 与 Zone → Zone → Read 权限。</div>
+            </div>
+          </div>
+          <div class="fields">
+            <div><label>Zone 名称</label><input type="text" id="zone_name" placeholder="example.com" /></div>
+            <div><label>记录名</label><input type="text" id="record_name" placeholder="tgapi.example.com" /></div>
+            <div><label>记录类型</label>
+              <select id="record_type"><option value="A">A（IPv4）</option><option value="AAAA">AAAA（IPv6）</option></select>
+            </div>
+            <div><label>TTL（秒，1=自动）</label><input type="number" id="record_ttl" min="1" max="86400" /></div>
+            <div><label>保留 IP 数量</label><input type="number" id="keep_count" min="1" max="5" /></div>
+            <div>
+              <label>代理状态</label>
+              <div class="switch"><input type="checkbox" id="record_proxied" /><span>橙云（Worker 需要灰云，保持关闭）</span></div>
+            </div>
+          </div>
+          <div style="margin-top:10px"><button class="ghost" id="testTokenBtn" type="button">测试 Token 与记录</button></div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">探测参数</div>
+          <div class="fields">
+            <div><label>探测域名（SNI/Host）</label><input type="text" id="probe_host" placeholder="留空则用记录名" /></div>
+            <div><label>探测路径</label><input type="text" id="probe_path" placeholder="/cdn-cgi/trace" /></div>
+            <div><label>候选 IP 数量</label><input type="number" id="candidate_count" min="10" max="5000" /></div>
+            <div><label>每 IP 采样轮数</label><input type="number" id="sample_rounds" min="1" max="6" /></div>
+            <div><label>并发数</label><input type="number" id="concurrency" min="1" max="256" /></div>
+            <div><label>单次超时（秒）</label><input type="number" id="timeout" step="0.5" min="1" max="30" /></div>
+            <div><label>最低成功率</label><input type="number" id="min_success_rate" step="0.05" min="0" max="1" /></div>
+            <div><label>最大可接受延迟（ms，0=不限）</label><input type="number" id="max_ttfb_ms" min="0" max="60000" /></div>
+          </div>
+          <div class="fields one" style="margin-top:10px">
+            <div>
+              <label>额外候选 IP / CIDR（每行一个，可选）</label>
+              <textarea id="extra_ips" placeholder="104.16.0.1&#10;104.17.128.1"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">调度与更新</div>
+          <div class="fields">
+            <div><label>扫描间隔（分钟，0=不定时）</label><input type="number" id="interval_minutes" min="0" max="10080" /></div>
+            <div><label>切换阈值（新 IP 快多少 % 才换）</label><input type="number" id="switch_margin_pct" min="0" max="100" /></div>
+          </div>
+          <div class="switch"><input type="checkbox" id="auto_update" /><span>扫描后自动更新解析（关闭则只扫描）</span></div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="primary" id="saveBtn" type="button">保存设置</button>
+          <button class="ghost" id="pwdBtn" type="button">修改管理密码</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head">
+      <h2>运行日志</h2>
+      <span class="hint">最近 150 条</span>
+    </div>
+    <div class="logs" id="logs"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let dirty = false;
+let timer = null;
+let lastLogKey = '';
+let scanning = false;
+let dnsTried = false;
+
+async function api(path, options = {}) {
+  const opts = Object.assign({ credentials: 'same-origin' }, options);
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(path, opts);
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* 忽略非 JSON */ }
+  if (!res.ok) throw new Error(data.error || data.detail || ('HTTP ' + res.status));
+  return data;
+}
+
+function toast(msg, isErr = false) {
+  const el = document.createElement('div');
+  if (isErr) el.className = 'err';
+  el.textContent = msg;
+  $('toast').appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function fmtRelative(ts) {
+  if (!ts) return '';
+  const diff = ts - Date.now() / 1000;
+  const abs = Math.abs(diff);
+  if (abs < 60) return diff > 0 ? '即将开始' : '刚刚';
+  if (abs < 3600) return diff > 0 ? `${Math.round(diff / 60)} 分钟后` : `${Math.round(abs / 60)} 分钟前`;
+  return diff > 0 ? `${(diff / 3600).toFixed(1)} 小时后` : `${(abs / 3600).toFixed(1)} 小时前`;
+}
+
+/* ---------------- 登录 ---------------- */
+
+let setupMode = false;
+
+async function boot() {
+  try {
+    const st = await api('/api/state');
+    $('verTag').textContent = 'v ' + (st.version || 'dev');
+    if (!st.initialized) {
+      setupMode = true;
+      $('loginTitle').textContent = '首次使用，设置管理密码';
+      $('loginHint').textContent = '密码保存在容器数据目录中，用于保护这个管理页面';
+      $('loginLayer').classList.remove('hidden');
+      $('pwdInput').focus();
+      return;
+    }
+    if (!st.authenticated) {
+      setupMode = false;
+      $('loginLayer').classList.remove('hidden');
+      $('pwdInput').focus();
+      return;
+    }
+    $('loginLayer').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    loadDashboard();
+    if (timer) clearInterval(timer);
+    timer = setInterval(loadDashboard, 3000);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$('loginForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const password = $('pwdInput').value;
+  if (password.length < 8) { toast('密码至少 8 位', true); return; }
+  try {
+    await api(setupMode ? '/api/setup' : '/api/login', { method: 'POST', body: { password } });
+    $('pwdInput').value = '';
+    boot();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+$('logoutBtn').addEventListener('click', async () => {
+  await api('/api/logout', { method: 'POST' });
+  if (timer) clearInterval(timer);
+  $('app').classList.add('hidden');
+  boot();
+});
+
+$('pwdBtn').addEventListener('click', async () => {
+  const pwd = prompt('输入新的管理密码（至少 8 位）');
+  if (!pwd) return;
+  try {
+    await api('/api/password', { method: 'POST', body: { password: pwd } });
+    toast('密码已更新');
+  } catch (e) { toast(e.message, true); }
+});
+
+/* ---------------- 仪表盘 ---------------- */
+
+function fillForm(s) {
+  if (dirty) return;
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  set('cf_token', s.cf_token || '');
+  set('zone_name', s.zone_name || '');
+  set('record_name', s.record_name || '');
+  set('record_type', s.record_type || 'A');
+  set('record_ttl', s.record_ttl);
+  set('keep_count', s.keep_count);
+  set('probe_host', s.probe_host || '');
+  set('probe_path', s.probe_path || '/cdn-cgi/trace');
+  set('candidate_count', s.candidate_count);
+  set('sample_rounds', s.sample_rounds);
+  set('concurrency', s.concurrency);
+  set('timeout', s.timeout);
+  set('min_success_rate', s.min_success_rate);
+  set('max_ttfb_ms', s.max_ttfb_ms);
+  set('extra_ips', s.extra_ips || '');
+  set('interval_minutes', s.interval_minutes);
+  set('switch_margin_pct', s.switch_margin_pct);
+  $('record_proxied').checked = !!s.record_proxied;
+  $('auto_update').checked = !!s.auto_update;
+}
+
+function renderOverview(data) {
+  const st = data.state || {};
+  const s = data.settings || {};
+  const rep = st.last_report;
+
+  $('curName').textContent = s.record_name || '未配置';
+  const ips = (st.dns_records || []).map(r => r.content).filter(Boolean);
+  $('curIps').innerHTML = ips.length
+    ? ips.map(ip => `<span class="chip">${ip}</span>`).join('')
+    : '<span class="sub">尚未读取（点「刷新解析状态」）</span>';
+  $('curMeta').textContent = st.dns_checked_at ? '读取于 ' + fmtTime(st.dns_checked_at) : '';
+  if (data.settings && data.settings.record_type) {
+    $('curName').textContent = (s.record_name || '未配置') + ' · ' + data.settings.record_type;
+  }
+
+  if (rep) {
+    $('lastScanTime').textContent = fmtTime(rep.finished_at);
+    $('lastScanMeta').textContent =
+      `测试 ${rep.tested} 个候选，耗时 ${rep.duration}s，入选 ${(rep.chosen || []).length} 个`;
+    $('aliveCount').textContent = `${rep.alive} / ${rep.tested}`;
+    const pct = rep.tested ? Math.round((rep.alive / rep.tested) * 100) : 0;
+    $('aliveBar').style.width = Math.min(100, pct) + '%';
+    $('aliveMeta').textContent = `可用率 ${pct}%`;
+  } else {
+    $('aliveCount').textContent = '—';
+    $('aliveBar').style.width = '0';
+  }
+
+  $('nextScan').textContent = st.next_run_at ? fmtRelative(st.next_run_at) : '已关闭';
+  $('intervalMeta').textContent = s.interval_minutes > 0
+    ? `每 ${s.interval_minutes} 分钟一次 · 自动更新${s.auto_update ? '开启' : '关闭'}`
+    : '定时扫描已关闭';
+
+  const chosen = (rep && rep.chosen) || [];
+  $('chosenChips').innerHTML = chosen.map(ip => `<span class="chip">${ip}</span>`).join('');
+
+  scanning = !!st.scanning;
+  const box = $('progressBox');
+  if (scanning) {
+    box.classList.remove('hidden');
+    const p = st.progress || {};
+    const done = p.done || 0, total = p.total || 0;
+    $('progressStage').textContent = p.stage || '扫描中';
+    $('progressText').textContent = total ? `${done} / ${total}` : '准备中';
+    $('progressBar').style.width = total ? Math.min(100, (done / total) * 100) + '%' : '8%';
+  } else {
+    box.classList.add('hidden');
+  }
+  $('pulseDot').className = 'pulse' + (scanning ? ' busy' : '');
+  $('statusText').textContent = scanning ? '扫描中' : '空闲';
+  $('nextRun').textContent = st.next_run_at && !scanning ? '下次 ' + fmtRelative(st.next_run_at) : '';
+
+  $('scanApplyBtn').disabled = scanning;
+  $('scanDryBtn').disabled = scanning;
+}
+
+function renderResults(rep, dnsIps) {
+  const wrap = $('resultWrap');
+  if (!rep || !rep.results || !rep.results.length) {
+    wrap.innerHTML = '<div class="empty">还没有扫描结果，点上面的按钮开始。</div>';
+    return;
+  }
+  const used = new Set(dnsIps || []);
+  const chosen = new Set(rep.chosen || []);
+  const rows = rep.results.slice(0, 40).map((r, i) => {
+    const okRate = Math.round((r.success_rate || 0) * 100);
+    const tags = [];
+    if (chosen.has(r.ip)) tags.push('<span class="badge ok">入选</span>');
+    if (used.has(r.ip)) tags.push('<span class="badge used">当前解析</span>');
+    if (!r.ok) tags.push('<span class="badge bad">不可用</span>');
+    const colo = r.colo && r.colo !== '' ? r.colo : '—';
+    return `<tr>
+      <td>${i + 1}</td>
+      <td class="mono">${r.ip}</td>
+      <td>${colo}</td>
+      <td class="mono">${r.ok ? r.ttfb_ms.toFixed(0) + ' ms' : '—'}</td>
+      <td class="mono">${r.ok ? r.handshake_ms.toFixed(0) + ' ms' : '—'}</td>
+      <td>${okRate}%</td>
+      <td>${tags.join(' ') || '<span class="badge">候选</span>'}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table>
+    <thead><tr><th>#</th><th>IP</th><th>机房</th><th>首字节</th><th>握手</th><th>成功率</th><th>标记</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="note">只展示前 40 个。首字节为中位数，成功率低于阈值的不会被自动采用。</div>`;
+  $('resultHint').textContent = `共 ${rep.tested} 个候选，${rep.alive} 个可用`;
+}
+
+function renderLogs(logs) {
+  const el = $('logs');
+  if (!logs || !logs.length) { el.innerHTML = '<div>暂无日志</div>'; return; }
+  const key = logs.length + ':' + (logs[logs.length - 1] || {}).ts;
+  if (key === lastLogKey) return;
+  lastLogKey = key;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.innerHTML = logs.map(l => {
+    const d = new Date(l.ts * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    const t = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    const cls = l.level === 'ERROR' ? 'error' : (l.level === 'WARNING' ? 'warn' : 'info');
+    return `<div class="${cls}"><span class="t">${t}</span>${escapeHtml(l.message)}</div>`;
+  }).join('');
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadDashboard() {
+  try {
+    const data = await api('/api/dashboard');
+    fillForm(data.settings || {});
+    renderOverview(data);
+    renderResults(data.state && data.state.last_report, (data.state && data.state.dns_records || []).map(r => r.content));
+    renderLogs(data.logs);
+    const st = data.state || {};
+    if (st.last_error && !scanning) {
+      $('resultHint').textContent = '错误：' + st.last_error;
+    }
+    if (!dirty && !st.dns_checked_at && !dnsTried && data.settings && data.settings.has_token) {
+      // 首次进入自动读一次当前解析，失败也只试一次，避免轮询里反复打 CF
+      dnsTried = true;
+      refreshDns(true);
+    }
+  } catch (e) {
+    if (String(e.message).includes('未登录')) {
+      if (timer) clearInterval(timer);
+      boot();
+    }
+  }
+}
+
+/* ---------------- 操作 ---------------- */
+
+async function startScan(apply) {
+  try {
+    await api('/api/scan', { method: 'POST', body: { apply } });
+    toast(apply ? '已开始扫描，完成后自动更新解析' : '已开始扫描（只读）');
+    setTimeout(loadDashboard, 600);
+  } catch (e) { toast(e.message, true); }
+}
+
+$('scanApplyBtn').addEventListener('click', () => startScan(true));
+$('scanDryBtn').addEventListener('click', () => startScan(false));
+
+async function refreshDns(silent) {
+  try {
+    const r = await api('/api/refresh-dns', { method: 'POST' });
+    if (!r.ok) throw new Error(r.error || '读取失败');
+    if (!silent) toast('已刷新解析状态');
+    loadDashboard();
+  } catch (e) { if (!silent) toast(e.message, true); }
+}
+$('refreshDnsBtn').addEventListener('click', () => refreshDns(false));
+
+$('testTokenBtn').addEventListener('click', async () => {
+  const btn = $('testTokenBtn');
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+  try {
+    const r = await api('/api/test-token', {
+      method: 'POST',
+      body: { cf_token: $('cf_token').value, zone_name: $('zone_name').value, record_name: $('record_name').value },
+    });
+    const recs = (r.records || []).map(x => x.content).join(', ') || '无同名记录';
+    toast(`Token 正常，Zone ${r.zone ? r.zone.name : '未校验'}，现有记录：${recs}`);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '测试 Token 与记录';
+  }
+});
+
+function collect() {
+  const num = (id) => Number($(id).value);
+  return {
+    cf_token: $('cf_token').value,
+    zone_name: $('zone_name').value,
+    record_name: $('record_name').value,
+    record_type: $('record_type').value,
+    record_ttl: num('record_ttl'),
+    record_proxied: $('record_proxied').checked,
+    keep_count: num('keep_count'),
+    probe_host: $('probe_host').value,
+    probe_path: $('probe_path').value,
+    candidate_count: num('candidate_count'),
+    sample_rounds: num('sample_rounds'),
+    concurrency: num('concurrency'),
+    timeout: num('timeout'),
+    min_success_rate: num('min_success_rate'),
+    max_ttfb_ms: num('max_ttfb_ms'),
+    extra_ips: $('extra_ips').value,
+    interval_minutes: num('interval_minutes'),
+    auto_update: $('auto_update').checked,
+    switch_margin_pct: num('switch_margin_pct'),
+  };
+}
+
+$('saveBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/settings', { method: 'PUT', body: collect() });
+    dirty = false;
+    toast('设置已保存');
+    loadDashboard();
+  } catch (e) { toast(e.message, true); }
+});
+
+document.querySelectorAll('#settingsForm input, #settingsForm textarea, #settingsForm select')
+  .forEach(el => el.addEventListener('input', () => { dirty = true; }));
+
+boot();
+</script>
+</body>
+</html>

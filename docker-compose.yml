@@ -1,0 +1,19 @@
+services:
+  cf-ip-optimizer:
+    image: ghcr.io/zlyon/cf-ip-optimizer:latest
+    container_name: cf-ip-optimizer
+    ports:
+      - "8787:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: Asia/Shanghai
+      # 需要非 1000 用户写 /data 时，取消下面一行注释并改成你的 UID:GID
+      # user: "1026:100"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
