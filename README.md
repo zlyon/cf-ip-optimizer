@@ -125,6 +125,14 @@ Cloudflare 控制台 → 右上头像 → **My Profile → API Tokens → Create
 
 **Worker + 灰云的特殊约束**：如果你的域名是 Worker 的 Custom Domain，改优选的正确姿势是「删掉 Custom Domain → 加灰云 A 记录 → 在 Worker 里加 Route `域名/*`」，否则 CF 会把解析锁死。本项目只负责维护 A 记录，不碰 Worker 绑定。
 
+**首次使用前必须删掉同名 CNAME**。Cloudflare 不允许同一主机名同时存在 CNAME 和 A 记录。如果你现在是「CNAME 指向某个优选域名」的做法，先把那条 CNAME 删掉，再让本工具接管——它会明确报错提示，不会静默失败：
+
+```
+「tgapi.example.com」当前是 CNAME 记录（指向 cdn.example.net）。
+Cloudflare 不允许同名 CNAME 与 A/AAAA 记录并存，请先在 DNS 页面删除这条 CNAME
+（并确认 Worker 的 Route 已配好）再运行。
+```
+
 ## 风险与边界
 
 - **单点**：优选出来的 IP 是硬编码进 DNS 的，CF 调整路由后可能失效。定时任务会持续复扫并自动换掉失效的，但如果扫描间隔很长，中间这段时间就是坏的。建议间隔 ≤ 6 小时。

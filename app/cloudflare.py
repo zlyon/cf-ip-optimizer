@@ -151,6 +151,25 @@ class CloudflareClient:
     def delete_record(self, zone_id: str, record_id: str) -> Any:
         return self._request("DELETE", f"/zones/{zone_id}/dns_records/{record_id}")
 
+    def find_conflicting_cname(
+        self, zone_id: str, name: str, record_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """A/AAAA 与 CNAME 不能同名共存，改记录前先查一下有没有 CNAME 挡路。"""
+        if record_type.upper() not in ("A", "AAAA"):
+            return None
+        records = self._request(
+            "GET",
+            f"/zones/{zone_id}/dns_records",
+            params={"name": name, "per_page": 100},
+        ) or []
+        for record in records:
+            if (
+                str(record.get("name", "")).lower() == name.lower()
+                and str(record.get("type", "")).upper() == "CNAME"
+            ):
+                return record
+        return None
+
     def sync_records(
         self,
         *,
@@ -170,6 +189,15 @@ class CloudflareClient:
             raise CloudflareError("目标 IP 列表为空，已跳过更新以防断服")
 
         zone_id = self.find_zone_id(zone_name)
+
+        conflict = self.find_conflicting_cname(zone_id, name, record_type)
+        if conflict is not None:
+            raise CloudflareError(
+                f"「{name}」当前是 CNAME 记录（指向 {conflict.get('content')}）。"
+                "Cloudflare 不允许同名 CNAME 与 A/AAAA 记录并存，"
+                "请先在 DNS 页面删除这条 CNAME（并确认 Worker 的 Route 已配好）再运行。"
+            )
+
         current = self.list_records(zone_id, name, record_type)
         current_by_ip = {str(r.get("content")): r for r in current}
 

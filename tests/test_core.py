@@ -57,15 +57,30 @@ class ColoParsingTest(unittest.TestCase):
 
 
 class SyncRecordsTest(unittest.TestCase):
-    def _client(self, existing):
+    def _client(self, existing, cname=None):
         client = CloudflareClient("token-1234567890")
         client.find_zone_id = lambda name: "zone-1"  # type: ignore[assignment]
+        client.find_conflicting_cname = lambda z, n, t: cname  # type: ignore[assignment]
         client.list_records = lambda z, n, t: list(existing)  # type: ignore[assignment]
         self.calls = []
         client.create_record = lambda *a, **kw: self.calls.append(("create", a[3]))  # type: ignore[assignment]
         client.delete_record = lambda z, rid: self.calls.append(("delete", rid))  # type: ignore[assignment]
         client.update_record = lambda z, rid, **kw: self.calls.append(("update", kw["content"]))  # type: ignore[assignment]
         return client
+
+    def test_cname_conflict_gives_actionable_error(self):
+        client = self._client([], cname={"id": "c1", "type": "CNAME", "content": "cdn.example.net"})
+        with self.assertRaises(Exception) as ctx:
+            client.sync_records(
+                zone_name="example.com",
+                name="cdn.example.com",
+                record_type="A",
+                ips=["1.1.1.1"],
+            )
+        message = str(ctx.exception)
+        self.assertIn("CNAME", message)
+        self.assertIn("cdn.example.net", message)
+        self.assertEqual(self.calls, [])
 
     def test_replaces_stale_ips_only(self):
         existing = [
