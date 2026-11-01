@@ -1,4 +1,9 @@
-"""FastAPI 应用：Web 管理界面 + REST API。"""
+"""FastAPI 应用：Web 管理界面 + REST API。
+
+配置分两层：
+  - 全局：Cloudflare Token、公共探测参数、调度总开关（PUT /api/settings）
+  - 域名块：每个域/记录一套独立配置（POST/PUT/DELETE /api/targets/{id}）
+"""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +14,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -17,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .cloudflare import CloudflareClient, CloudflareError
 from .runner import Optimizer
-from .store import Store, verify_password
+from .store import DEFAULT_TARGET, Store, verify_password
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = os.getenv("DATA_DIR", "/data")
@@ -111,6 +116,15 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def public_target(target: Dict[str, Any]) -> Dict[str, Any]:
+    out = {k: v for k, v in target.items() if k != "payload"}
+    out["configured"] = bool(
+        str(target.get("zone_name") or "").strip()
+        and str(target.get("record_name") or "").strip()
+    )
+    return out
+
+
 def _clamp(value: Any, default: Any, minimum: Any, maximum: Any) -> Any:
     try:
         number = type(default)(value)
@@ -120,21 +134,13 @@ def _clamp(value: Any, default: Any, minimum: Any, maximum: Any) -> Any:
 
 
 def sanitize(incoming: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
+    """全局设置。"""
     data = dict(current)
 
     token = str(incoming.get("cf_token", "")).strip()
     if token and not _masked(token):
         data["cf_token"] = token
 
-    data["zone_name"] = str(incoming.get("zone_name", current.get("zone_name", ""))).strip()
-    data["record_name"] = str(incoming.get("record_name", current.get("record_name", ""))).strip()
-    record_type = str(incoming.get("record_type", current.get("record_type", "A"))).upper()
-    data["record_type"] = record_type if record_type in ("A", "AAAA") else "A"
-    data["record_ttl"] = _clamp(incoming.get("record_ttl"), 300, 1, 86400)
-    data["record_proxied"] = bool(incoming.get("record_proxied", current.get("record_proxied", False)))
-    data["keep_count"] = _clamp(incoming.get("keep_count"), 2, 1, 5)
-
-    data["probe_host"] = str(incoming.get("probe_host", current.get("probe_host", ""))).strip()
     path = str(incoming.get("probe_path", current.get("probe_path", "/cdn-cgi/trace"))).strip()
     data["probe_path"] = path if path.startswith("/") else "/" + path
     data["probe_port"] = _clamp(incoming.get("probe_port"), 443, 1, 65535)
@@ -144,11 +150,44 @@ def sanitize(incoming: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any
     data["timeout"] = _clamp(incoming.get("timeout"), 4.0, 1.0, 30.0)
     data["min_success_rate"] = _clamp(incoming.get("min_success_rate"), 0.5, 0.0, 1.0)
     data["max_ttfb_ms"] = _clamp(incoming.get("max_ttfb_ms"), 3000, 0, 60000)
-    data["extra_ips"] = str(incoming.get("extra_ips", current.get("extra_ips", "")))
 
+    data["schedule_enabled"] = bool(
+        incoming.get("schedule_enabled", current.get("schedule_enabled", True))
+    )
     data["interval_minutes"] = _clamp(incoming.get("interval_minutes"), 360, 0, 10080)
     data["auto_update"] = bool(incoming.get("auto_update", current.get("auto_update", True)))
     data["switch_margin_pct"] = _clamp(incoming.get("switch_margin_pct"), 15, 0, 100)
+    return data
+
+
+def sanitize_target(incoming: Dict[str, Any], current: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """单个域名块。current 为空表示新建，缺省值取 DEFAULT_TARGET。"""
+    base = dict(DEFAULT_TARGET)
+    if current:
+        base.update(current)
+
+    def pick(key: str, default: Any = "") -> Any:
+        value = incoming.get(key, base.get(key, default))
+        return default if value is None else value
+
+    data: Dict[str, Any] = dict(base)
+    data["label"] = str(pick("label", ""))[:40].strip()
+    zone = str(pick("zone_name", "")).strip().lower().rstrip(".")
+    data["zone_name"] = zone
+    data["record_name"] = str(pick("record_name", "")).strip().lower().rstrip(".")
+    record_type = str(pick("record_type", "A")).upper()
+    data["record_type"] = record_type if record_type in ("A", "AAAA") else "A"
+    data["record_ttl"] = _clamp(pick("record_ttl", 300), 300, 1, 86400)
+    data["record_proxied"] = bool(pick("record_proxied", False))
+    data["keep_count"] = _clamp(pick("keep_count", 2), 2, 1, 10)
+    data["probe_host"] = str(pick("probe_host", "")).strip()
+    path = str(pick("probe_path", "")).strip()
+    data["probe_path"] = ("/" + path) if path and not path.startswith("/") else path
+    data["extra_ips"] = str(pick("extra_ips", ""))
+    data["interval_minutes"] = _clamp(pick("interval_minutes", 360), 360, 0, 10080)
+    data["auto_update"] = bool(pick("auto_update", True))
+    data["switch_margin_pct"] = _clamp(pick("switch_margin_pct", 15), 15, 0, 100)
+    data["enabled"] = bool(pick("enabled", True))
     return data
 
 
@@ -246,10 +285,18 @@ async def get_state(request: Request) -> Dict[str, Any]:
 @app.get("/api/dashboard")
 async def dashboard(request: Request, _: None = Depends(require_auth)) -> Dict[str, Any]:
     settings = store.get_settings()
+    snapshot = optimizer.snapshot()
+    states = snapshot.get("targets", {})
+    targets: List[Dict[str, Any]] = []
+    for target in store.list_targets():
+        item = public_target(target)
+        item["state"] = states.get(target["id"], {})
+        targets.append(item)
     return {
         "settings": public_settings(settings),
-        "state": optimizer.snapshot(),
-        "history": store.recent_scans(12),
+        "targets": targets,
+        "state": snapshot,
+        "history": store.recent_scans(20),
         "logs": optimizer.log_handler.snapshot(150),
         "version": _version(),
     }
@@ -259,12 +306,64 @@ async def dashboard(request: Request, _: None = Depends(require_auth)) -> Dict[s
 async def update_settings(payload: Dict[str, Any], _: None = Depends(require_auth)) -> Dict[str, Any]:
     current = store.get_settings()
     merged = sanitize(payload, current)
-    if not merged.get("probe_host"):
-        merged["probe_host"] = merged.get("record_name", "")
     saved = store.save_settings(merged)
     optimizer.reload_schedule()
-    LOGGER.info("设置已保存")
+    LOGGER.info("全局设置已保存")
     return {"ok": True, "settings": public_settings(saved)}
+
+
+@app.post("/api/targets")
+async def create_target(payload: Optional[Dict[str, Any]] = None, _: None = Depends(require_auth)) -> Dict[str, Any]:
+    settings = store.get_settings()
+    incoming = dict(payload or {})
+    # 新建块继承全局调度默认值
+    incoming.setdefault("interval_minutes", settings.get("interval_minutes", 360))
+    incoming.setdefault("auto_update", settings.get("auto_update", True))
+    incoming.setdefault("switch_margin_pct", settings.get("switch_margin_pct", 15))
+    data = sanitize_target(incoming)
+    if data["zone_name"] and data["record_name"]:
+        clash = store.find_target_by_record(
+            data["zone_name"], data["record_name"], data["record_type"]
+        )
+        if clash:
+            raise HTTPException(status_code=400, detail="已存在同名记录的域名块")
+    saved = store.upsert_target(data)
+    optimizer.reload_schedule()
+    LOGGER.info("新增域名块：%s", saved.get("record_name") or saved["id"])
+    return {"ok": True, "target": public_target(saved)}
+
+
+@app.put("/api/targets/{target_id}")
+async def update_target(
+    target_id: str, payload: Dict[str, Any], _: None = Depends(require_auth)
+) -> Dict[str, Any]:
+    current = store.get_target(target_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="域名块不存在")
+    data = sanitize_target(payload, current)
+    data["id"] = target_id
+    if data["zone_name"] and data["record_name"]:
+        clash = store.find_target_by_record(
+            data["zone_name"], data["record_name"], data["record_type"], exclude_id=target_id
+        )
+        if clash:
+            raise HTTPException(status_code=400, detail="另一个域名块已使用同名记录")
+    saved = store.upsert_target(data)
+    optimizer.reload_schedule()
+    LOGGER.info("域名块已更新：%s", saved.get("record_name") or target_id)
+    return {"ok": True, "target": public_target(saved)}
+
+
+@app.delete("/api/targets/{target_id}")
+async def delete_target(target_id: str, _: None = Depends(require_auth)) -> Dict[str, Any]:
+    target = store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="域名块不存在")
+    store.delete_target(target_id)
+    optimizer.states.pop(target_id, None)
+    optimizer.reload_schedule()
+    LOGGER.info("已删除域名块：%s", target.get("record_name") or target_id)
+    return {"ok": True}
 
 
 @app.post("/api/test-token")
@@ -273,8 +372,9 @@ async def test_token(payload: Dict[str, Any], _: None = Depends(require_auth)) -
     token = str(payload.get("cf_token") or "").strip()
     if not token or _masked(token):
         token = settings.get("cf_token", "")
-    zone_name = str(payload.get("zone_name") or settings.get("zone_name") or "").strip()
-    record_name = str(payload.get("record_name") or settings.get("record_name") or "").strip()
+    zone_name = str(payload.get("zone_name") or "").strip()
+    record_name = str(payload.get("record_name") or "").strip()
+    record_type = str(payload.get("record_type") or "A").upper()
     if not token:
         raise HTTPException(status_code=400, detail="未提供 Token")
 
@@ -287,10 +387,7 @@ async def test_token(payload: Dict[str, Any], _: None = Depends(require_auth)) -
             result["zone"] = {"name": zone_name, "id": zone_id}
             if record_name:
                 records = await asyncio.to_thread(
-                    client.list_records,
-                    zone_id,
-                    record_name,
-                    str(settings.get("record_type") or "A"),
+                    client.list_records, zone_id, record_name, record_type
                 )
                 result["records"] = [
                     {"content": r.get("content"), "ttl": r.get("ttl"), "proxied": r.get("proxied")}
@@ -305,19 +402,29 @@ async def test_token(payload: Dict[str, Any], _: None = Depends(require_auth)) -
 
 
 @app.post("/api/scan")
-async def trigger_scan(payload: Optional[Dict[str, Any]] = None, _: None = Depends(require_auth)) -> Dict[str, Any]:
-    if optimizer.state.scanning:
+async def trigger_scan(
+    payload: Optional[Dict[str, Any]] = None, _: None = Depends(require_auth)
+) -> Dict[str, Any]:
+    if optimizer.snapshot().get("scanning"):
         return {"ok": False, "error": "已有扫描在进行中"}
-    apply_flag = None
-    if payload and "apply" in payload:
-        apply_flag = bool(payload.get("apply"))
-    asyncio.create_task(optimizer.run_scan(trigger="manual", apply=apply_flag))
+    body = payload or {}
+    target_id = str(body.get("target_id") or "").strip() or None
+    apply_flag: Optional[bool] = None
+    if "apply" in body:
+        apply_flag = bool(body.get("apply"))
+    if target_id and not store.get_target(target_id):
+        raise HTTPException(status_code=404, detail="域名块不存在")
+    asyncio.create_task(optimizer.run_scan(target_id=target_id, trigger="manual", apply=apply_flag))
     return {"ok": True, "started": True}
 
 
 @app.post("/api/refresh-dns")
-async def refresh_dns(_: None = Depends(require_auth)) -> Dict[str, Any]:
-    return await optimizer.refresh_dns()
+async def refresh_dns(
+    payload: Optional[Dict[str, Any]] = None, _: None = Depends(require_auth)
+) -> Dict[str, Any]:
+    body = payload or {}
+    target_id = str(body.get("target_id") or "").strip() or None
+    return await optimizer.refresh_dns(target_id)
 
 
 def _version() -> str:

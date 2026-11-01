@@ -19,6 +19,7 @@
                      radial-gradient(800px 420px at 92% 0%,rgba(56,189,248,.09),transparent 55%);}
   a{color:var(--accent2);text-decoration:none}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .hidden{display:none !important}
 
   header{display:flex;align-items:center;gap:14px;padding:16px 22px;
@@ -35,9 +36,10 @@
   .pulse.busy{background:var(--warn);animation:pulse 1s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 
-  main{max-width:1220px;margin:0 auto;padding:22px 22px 60px}
+  main{max-width:1220px;margin:0 auto;padding:22px 22px 90px}
 
-  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px}
+  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin-bottom:16px}
+  @media(max-width:900px){.overview{grid-template-columns:1fr 1fr}}
   .card{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);
     border-radius:var(--radius);padding:15px 16px;position:relative;overflow:hidden}
   .card h3{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.6px;text-transform:uppercase}
@@ -52,20 +54,25 @@
   button{font:inherit;cursor:pointer;border-radius:10px;padding:9px 16px;border:1px solid var(--line);
     background:#16202c;color:var(--text);transition:.15s;font-weight:550}
   button:hover:not(:disabled){border-color:#2f4459;background:#1b2735;transform:translateY(-1px)}
-  button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   button.primary{background:linear-gradient(180deg,#22c9b8,#149e93);border-color:#1ab3a5;color:#04120f}
   button.primary:hover:not(:disabled){filter:brightness(1.07)}
   button.ghost{background:transparent}
   button.danger{border-color:rgba(248,113,113,.35);color:#fca5a5;background:rgba(248,113,113,.06)}
+  button.sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
 
-  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
+  .grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;align-items:start}
   @media(max-width:980px){.grid{grid-template-columns:1fr}}
 
   .panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);
     border-radius:var(--radius);padding:16px}
-  .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
   .panel-head h2{margin:0;font-size:14px;font-weight:650;letter-spacing:.3px}
   .panel-head .hint{font-size:12px;color:var(--muted)}
+  .panel.clip > .panel-body{display:none}
+  .panel.clip .panel-head{margin-bottom:0}
+  .panel-head .caret{width:22px;height:22px;padding:0;border:none;background:transparent;color:var(--muted);font-size:11px;border-radius:6px}
+  .panel.clip .caret{transform:rotate(-90deg)}
 
   table{width:100%;border-collapse:collapse;font-size:12.8px}
   #resultWrap{max-height:470px;overflow:auto;margin:0 -6px;padding:0 6px}
@@ -94,13 +101,15 @@
     transition:width .3s}
 
   form .group{margin-bottom:18px}
-  form .group-title{font-size:11.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);
+  form .group:last-of-type{margin-bottom:12px}
+  .group-title{font-size:11.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);
     margin-bottom:10px;padding-bottom:6px;border-bottom:1px dashed var(--line)}
   .fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
   .fields.one{grid-template-columns:1fr}
-  @media(max-width:640px){.fields{grid-template-columns:1fr}}
+  .fields .span2{grid-column:1/-1}
+  @media(max-width:640px){.fields{grid-template-columns:1fr}.fields .span2{grid-column:auto}}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  input[type=text],input[type=password],input[type=number],textarea,select{
+  input[type=text],input[type=password],input[type=number],input:not([type]),textarea,select{
     width:100%;background:#0b121a;border:1px solid var(--line);border-radius:9px;
     color:var(--text);padding:8px 10px;font:inherit;font-size:13px;outline:none;transition:.15s}
   input:focus,textarea:focus,select:focus{border-color:#2f6a72;box-shadow:0 0 0 3px rgba(45,212,191,.10)}
@@ -108,6 +117,46 @@
   .switch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin-top:6px}
   .switch input{width:16px;height:16px;accent-color:var(--accent)}
   .note{font-size:11.8px;color:var(--muted);margin-top:6px}
+
+  /* ---- 域名块 ---- */
+  .tblock{border:1px solid var(--line);border-radius:12px;
+    background:linear-gradient(180deg,#121a24,#0d141d);margin-bottom:12px;overflow:hidden;transition:border-color .15s}
+  .tblock:hover{border-color:#26374a}
+  .tblock.dirty{border-color:rgba(251,191,36,.45)}
+  .tblock.off{opacity:.72}
+  .tblock-head{display:flex;align-items:center;gap:9px;padding:10px 13px;background:rgba(255,255,255,.015);flex-wrap:wrap}
+  .tblock-body{padding:13px 13px 13px;border-top:1px solid rgba(30,42,56,.7)}
+  .tblock.clip .tblock-body{display:none}
+  .caret{width:22px;height:22px;padding:0;border:none;background:transparent;color:var(--muted);font-size:11px;border-radius:6px;flex:none}
+  .caret:hover{background:#1b2735;transform:none}
+  .tblock.clip .caret{transform:rotate(-90deg)}
+  .ttitles{min-width:0;display:flex;flex-direction:column;gap:1px;flex:1}
+  .tblock .tlabel{width:100%;max-width:260px;padding:3px 7px;font-size:13px;font-weight:600;
+    background:transparent;border:1px solid transparent;border-radius:7px}
+  .tblock .tlabel:hover{border-color:var(--line)}
+  .tsub{font-size:11.5px;color:var(--muted);padding-left:8px;word-break:break-all}
+  .stchip{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .stchip.ok{color:#6ee7b7;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+  .stchip.busy{color:#fcd34d;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+  .stchip.err{color:#fca5a5;border-color:rgba(248,113,113,.32);background:rgba(248,113,113,.08)}
+  .mini{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;margin:0}
+  .mini input{width:15px;height:15px;accent-color:var(--accent)}
+  .tctrl{display:flex;align-items:center;gap:7px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+  .icon{padding:5px 10px;font-size:12px;border-radius:8px;flex:none}
+  .tmeta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:12px;padding-top:10px;
+    border-top:1px dashed var(--line);font-size:12px}
+  .metarow{display:flex;gap:7px;align-items:baseline;min-width:0;flex-wrap:wrap}
+  .metarow .k{color:var(--muted);flex:none}
+  .metarow .v{color:var(--text);word-break:break-all}
+  .metarow .v.err{color:#fca5a5}
+  .tblock-foot{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .tprog{margin-top:10px}
+  .add-block{width:100%;border:1px dashed #2b3f52;background:transparent;color:var(--muted);
+    padding:15px;border-radius:12px;font-size:13px;letter-spacing:.3px}
+  .add-block:hover{border-color:var(--accent);color:var(--accent);background:rgba(45,212,191,.05);transform:none}
+  .savebar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;display:flex;align-items:center;
+    gap:12px;background:#132030;border:1px solid #2a4256;border-radius:12px;padding:9px 14px;
+    box-shadow:0 16px 40px rgba(0,0,0,.55);z-index:40;font-size:13px}
 
   .logs{max-height:260px;overflow:auto;font-family:ui-monospace,monospace;font-size:12px;
     background:#080c11;border:1px solid var(--line);border-radius:10px;padding:10px 12px;line-height:1.7}
@@ -117,10 +166,10 @@
   .logs .error{color:var(--danger)}
   .logs .info{color:#9db0c3}
 
-  .toast{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:50}
+  .toast{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:60}
   .toast div{background:#16202c;border:1px solid var(--line);border-left:3px solid var(--accent);
     padding:10px 14px;border-radius:10px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.45);
-    animation:slideIn .2s ease}
+    animation:slideIn .2s ease;max-width:340px}
   .toast div.err{border-left-color:var(--danger)}
   @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
@@ -162,138 +211,136 @@
 <main id="app" class="hidden">
   <section class="overview">
     <div class="card">
-      <h3>当前解析</h3>
-      <div class="big" id="curName">—</div>
-      <div class="chips" id="curIps"><span class="sub">尚未读取</span></div>
-      <div class="sub" id="curMeta"></div>
+      <h3>域名块</h3>
+      <div class="big" id="targetCount">0</div>
+      <div class="sub" id="targetMeta">还没有添加</div>
     </div>
     <div class="card">
-      <h3>最近扫描</h3>
-      <div class="big" id="lastScanTime">—</div>
-      <div class="sub" id="lastScanMeta">还没有扫描记录</div>
-    </div>
-    <div class="card">
-      <h3>可用 / 候选</h3>
-      <div class="big" id="aliveCount">—</div>
-      <div class="bar"><i id="aliveBar" style="width:0"></i></div>
-      <div class="sub" id="aliveMeta"></div>
+      <h3>扫描状态</h3>
+      <div class="big" id="scanState">空闲</div>
+      <div class="bar"><i id="scanBar" style="width:0"></i></div>
+      <div class="sub" id="scanMeta">等待下一次调度</div>
     </div>
     <div class="card">
       <h3>下次自动扫描</h3>
       <div class="big" id="nextScan">—</div>
-      <div class="sub" id="intervalMeta"></div>
-      <div class="chips" id="chosenChips"></div>
+      <div class="sub" id="nextMeta"></div>
+      <div class="chips" id="nextChips"></div>
+    </div>
+    <div class="card">
+      <h3>最近一轮</h3>
+      <div class="big" id="lastScanTime">—</div>
+      <div class="sub" id="lastScanMeta">还没有扫描记录</div>
     </div>
   </section>
 
   <section class="toolbar">
-    <button class="primary" id="scanApplyBtn">立即扫描并更新解析</button>
-    <button id="scanDryBtn">只扫描不更新</button>
-    <button class="ghost" id="refreshDnsBtn">刷新解析状态</button>
+    <button class="primary" id="scanAllBtn">全部扫描并更新</button>
+    <button id="scanAllDryBtn">全部只扫描</button>
+    <button class="ghost" id="refreshAllBtn">刷新全部解析</button>
+    <button class="ghost" id="saveAllBtn" disabled>保存全部修改</button>
   </section>
 
-  <section class="progress hidden" id="progressBox">
-    <div class="row"><span id="progressStage">准备中</span><span id="progressText">0 / 0</span></div>
-    <div class="track"><i id="progressBar"></i></div>
+  <section class="panel" id="globalPanel" style="margin-bottom:16px">
+    <div class="panel-head" id="globalHead" style="cursor:pointer">
+      <h2>全局设置 <span class="tag" id="globalHint">Token 与公共探测参数</span></h2>
+      <span class="caret">▼</span>
+    </div>
+    <div class="panel-body">
+      <form id="globalForm" onsubmit="return false">
+        <div class="group">
+          <div class="group-title">Cloudflare API Token（所有域名块共用）</div>
+          <div class="fields one">
+            <div>
+              <input type="text" id="gf_cf_token" data-gf="cf_token" placeholder="粘贴 Token" autocomplete="off" />
+              <div class="note">需要 Zone → DNS → Edit 与 Zone → Zone → Read 权限，可只授权单个 Zone。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">公共探测参数（域名块未覆盖时使用）</div>
+          <div class="fields">
+            <div><label>探测路径</label><input type="text" id="gf_probe_path" data-gf="probe_path" placeholder="/cdn-cgi/trace" /></div>
+            <div><label>探测端口</label><input type="number" id="gf_probe_port" data-gf="probe_port" min="1" max="65535" /></div>
+            <div><label>候选 IP 数量</label><input type="number" id="gf_candidate_count" data-gf="candidate_count" min="10" max="5000" /></div>
+            <div><label>每 IP 采样轮数</label><input type="number" id="gf_sample_rounds" data-gf="sample_rounds" min="1" max="6" /></div>
+            <div><label>并发数</label><input type="number" id="gf_concurrency" data-gf="concurrency" min="1" max="256" /></div>
+            <div><label>单次超时（秒）</label><input type="number" id="gf_timeout" data-gf="timeout" step="0.5" min="1" max="30" /></div>
+            <div><label>最低成功率</label><input type="number" id="gf_min_success_rate" data-gf="min_success_rate" step="0.05" min="0" max="1" /></div>
+            <div><label>最大可接受延迟（ms，0=不限）</label><input type="number" id="gf_max_ttfb_ms" data-gf="max_ttfb_ms" min="0" max="60000" /></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">调度默认值（新建域名块时继承）</div>
+          <div class="fields">
+            <div><label>默认扫描间隔（分钟）</label><input type="number" id="gf_interval_minutes" data-gf="interval_minutes" min="0" max="10080" /></div>
+            <div><label>默认切换阈值（%）</label><input type="number" id="gf_switch_margin_pct" data-gf="switch_margin_pct" min="0" max="100" /></div>
+          </div>
+          <div class="switch"><input type="checkbox" id="gf_schedule_enabled" data-gf="schedule_enabled" /><span>启用定时扫描（总开关，关闭后所有域名块暂停排期）</span></div>
+          <div class="switch"><input type="checkbox" id="gf_auto_update" data-gf="auto_update" /><span>新建域名块默认自动更新解析</span></div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="primary" id="saveGlobalBtn" type="button">保存全局设置</button>
+          <button class="ghost" id="pwdBtn" type="button">修改管理密码</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head">
+      <h2>域名与记录</h2>
+      <span class="hint">每个块独立设置记录、探测与定时任务</span>
+    </div>
+    <div id="targetList"></div>
+    <button class="add-block" id="addTargetBtn">＋ 添加域名块</button>
   </section>
 
   <div class="grid">
     <section class="panel">
       <div class="panel-head">
         <h2>扫描结果</h2>
-        <span class="hint" id="resultHint">按成功率与延迟排序</span>
+        <select id="resultPicker" style="width:auto;max-width:280px;padding:5px 8px;font-size:12.5px"></select>
       </div>
       <div id="resultWrap">
-        <div class="empty">还没有扫描结果，点上面的按钮开始。</div>
+        <div class="empty">还没有扫描结果。</div>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>设置</h2>
-        <span class="hint">保存后立即生效</span>
+        <h2>运行日志</h2>
+        <span class="hint">最近 150 条</span>
       </div>
-      <form id="settingsForm" onsubmit="return false">
-        <div class="group">
-          <div class="group-title">Cloudflare</div>
-          <div class="fields one">
-            <div>
-              <label>API Token（Zone.DNS 编辑权限）</label>
-              <input type="text" id="cf_token" placeholder="粘贴 Token" autocomplete="off" />
-              <div class="note">需要 Zone → DNS → Edit 与 Zone → Zone → Read 权限。</div>
-            </div>
-          </div>
-          <div class="fields">
-            <div><label>Zone 名称</label><input type="text" id="zone_name" placeholder="example.com" /></div>
-            <div><label>记录名</label><input type="text" id="record_name" placeholder="tgapi.example.com" /></div>
-            <div><label>记录类型</label>
-              <select id="record_type"><option value="A">A（IPv4）</option><option value="AAAA">AAAA（IPv6）</option></select>
-            </div>
-            <div><label>TTL（秒，1=自动）</label><input type="number" id="record_ttl" min="1" max="86400" /></div>
-            <div><label>保留 IP 数量</label><input type="number" id="keep_count" min="1" max="5" /></div>
-            <div>
-              <label>代理状态</label>
-              <div class="switch"><input type="checkbox" id="record_proxied" /><span>橙云（Worker 需要灰云，保持关闭）</span></div>
-            </div>
-          </div>
-          <div style="margin-top:10px"><button class="ghost" id="testTokenBtn" type="button">测试 Token 与记录</button></div>
-        </div>
-
-        <div class="group">
-          <div class="group-title">探测参数</div>
-          <div class="fields">
-            <div><label>探测域名（SNI/Host）</label><input type="text" id="probe_host" placeholder="留空则用记录名" /></div>
-            <div><label>探测路径</label><input type="text" id="probe_path" placeholder="/cdn-cgi/trace" /></div>
-            <div><label>候选 IP 数量</label><input type="number" id="candidate_count" min="10" max="5000" /></div>
-            <div><label>每 IP 采样轮数</label><input type="number" id="sample_rounds" min="1" max="6" /></div>
-            <div><label>并发数</label><input type="number" id="concurrency" min="1" max="256" /></div>
-            <div><label>单次超时（秒）</label><input type="number" id="timeout" step="0.5" min="1" max="30" /></div>
-            <div><label>最低成功率</label><input type="number" id="min_success_rate" step="0.05" min="0" max="1" /></div>
-            <div><label>最大可接受延迟（ms，0=不限）</label><input type="number" id="max_ttfb_ms" min="0" max="60000" /></div>
-          </div>
-          <div class="fields one" style="margin-top:10px">
-            <div>
-              <label>额外候选 IP / CIDR（每行一个，可选）</label>
-              <textarea id="extra_ips" placeholder="104.16.0.1&#10;104.17.128.1"></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div class="group">
-          <div class="group-title">调度与更新</div>
-          <div class="fields">
-            <div><label>扫描间隔（分钟，0=不定时）</label><input type="number" id="interval_minutes" min="0" max="10080" /></div>
-            <div><label>切换阈值（新 IP 快多少 % 才换）</label><input type="number" id="switch_margin_pct" min="0" max="100" /></div>
-          </div>
-          <div class="switch"><input type="checkbox" id="auto_update" /><span>扫描后自动更新解析（关闭则只扫描）</span></div>
-        </div>
-
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="primary" id="saveBtn" type="button">保存设置</button>
-          <button class="ghost" id="pwdBtn" type="button">修改管理密码</button>
-        </div>
-      </form>
+      <div class="logs" id="logs"></div>
     </section>
   </div>
-
-  <section class="panel" style="margin-top:16px">
-    <div class="panel-head">
-      <h2>运行日志</h2>
-      <span class="hint">最近 150 条</span>
-    </div>
-    <div class="logs" id="logs"></div>
-  </section>
 </main>
+
+<div class="savebar hidden" id="saveBar">
+  <span id="saveBarText">有未保存的修改</span>
+  <button class="primary sm" id="saveBarBtn">保存全部</button>
+</div>
 
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let dirty = false;
+let TARGETS = [];
+let STATES = {};
+let dirty = new Set();
+let globalDirty = false;
+let builtKey = '';
+let activeId = localStorage.getItem('cfip-active') || null;
 let timer = null;
 let lastLogKey = '';
-let scanning = false;
 let dnsTried = false;
+let collapsed = new Set(JSON.parse(localStorage.getItem('cfip-collapsed') || '[]'));
+
+/* ---------------- 基础 ---------------- */
 
 async function api(path, options = {}) {
   const opts = Object.assign({ credentials: 'same-origin' }, options);
@@ -331,6 +378,13 @@ function fmtRelative(ts) {
   if (abs < 3600) return diff > 0 ? `${Math.round(diff / 60)} 分钟后` : `${Math.round(abs / 60)} 分钟前`;
   return diff > 0 ? `${(diff / 3600).toFixed(1)} 小时后` : `${(abs / 3600).toFixed(1)} 小时前`;
 }
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function targetById(id) { return TARGETS.find(t => t.id === id); }
+function blockEl(id) { return document.querySelector(`.tblock[data-id="${id}"]`); }
 
 /* ---------------- 登录 ---------------- */
 
@@ -393,95 +447,462 @@ $('pwdBtn').addEventListener('click', async () => {
   } catch (e) { toast(e.message, true); }
 });
 
-/* ---------------- 仪表盘 ---------------- */
+/* ---------------- 全局设置 ---------------- */
 
-function fillForm(s) {
-  if (dirty) return;
-  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
-  set('cf_token', s.cf_token || '');
-  set('zone_name', s.zone_name || '');
-  set('record_name', s.record_name || '');
-  set('record_type', s.record_type || 'A');
-  set('record_ttl', s.record_ttl);
-  set('keep_count', s.keep_count);
-  set('probe_host', s.probe_host || '');
-  set('probe_path', s.probe_path || '/cdn-cgi/trace');
-  set('candidate_count', s.candidate_count);
-  set('sample_rounds', s.sample_rounds);
-  set('concurrency', s.concurrency);
-  set('timeout', s.timeout);
-  set('min_success_rate', s.min_success_rate);
-  set('max_ttfb_ms', s.max_ttfb_ms);
-  set('extra_ips', s.extra_ips || '');
-  set('interval_minutes', s.interval_minutes);
-  set('switch_margin_pct', s.switch_margin_pct);
-  $('record_proxied').checked = !!s.record_proxied;
-  $('auto_update').checked = !!s.auto_update;
+const GF = ['cf_token','probe_path','probe_port','candidate_count','sample_rounds','concurrency',
+  'timeout','min_success_rate','max_ttfb_ms','interval_minutes','switch_margin_pct','schedule_enabled','auto_update'];
+
+function fillGlobal(s) {
+  if (globalDirty) return;
+  GF.forEach(k => {
+    const el = document.querySelector(`[data-gf="${k}"]`);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!s[k];
+    else if (document.activeElement !== el) el.value = s[k] === undefined || s[k] === null ? '' : s[k];
+  });
+  $('globalHint').textContent = s.has_token ? 'Token 已配置' : '还没填 Token';
 }
+
+function collectGlobal() {
+  const body = {};
+  GF.forEach(k => {
+    const el = document.querySelector(`[data-gf="${k}"]`);
+    if (!el) return;
+    body[k] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  return body;
+}
+
+$('saveGlobalBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/settings', { method: 'PUT', body: collectGlobal() });
+    globalDirty = false;
+    toast('全局设置已保存');
+    loadDashboard();
+  } catch (e) { toast(e.message, true); }
+});
+
+document.querySelectorAll('[data-gf]').forEach(el => {
+  el.addEventListener('input', () => { globalDirty = true; });
+  el.addEventListener('change', () => { globalDirty = true; });
+});
+
+$('globalHead').addEventListener('click', () => {
+  $('globalPanel').classList.toggle('clip');
+});
+
+/* ---------------- 域名块渲染 ---------------- */
+
+const TFIELDS = ['label','zone_name','record_name','record_type','record_ttl','record_proxied',
+  'keep_count','probe_host','probe_path','extra_ips','interval_minutes','auto_update','switch_margin_pct','enabled'];
+
+function blockHtml(t) {
+  const typ = t.record_type || 'A';
+  const sub = t.record_name
+    ? `${escapeHtml(t.record_name)} · ${typ}`
+    : '<span style="color:#f87171">未填写记录名</span>';
+  return `
+  <article class="tblock" data-id="${t.id}">
+    <div class="tblock-head">
+      <button class="caret" data-act="toggle" type="button">▼</button>
+      <div class="ttitles">
+        <input type="text" class="tlabel" data-f="label" placeholder="备注名（如 主站 / TG 反代）" value="${escapeHtml(t.label || '')}" />
+        <div class="tsub" data-role="sub">${sub}</div>
+      </div>
+      <div class="tctrl">
+        <span class="stchip" data-role="chip">空闲</span>
+        <label class="mini"><input type="checkbox" data-f="enabled" ${t.enabled ? 'checked' : ''}/><span>启用</span></label>
+        <button class="icon" data-act="scan" type="button" title="按此块的「自动更新」开关决定是否写入解析">扫描</button>
+        <button class="icon" data-act="test" type="button" title="校验 Token 与这条记录">测试</button>
+        <button class="icon" data-act="dns" type="button" title="读取当前解析 IP">解析</button>
+        <button class="icon danger" data-act="del" type="button" title="删除这个域名块">✕</button>
+      </div>
+    </div>
+    <div class="tblock-body">
+      <div class="fields">
+        <div><label>Zone 名称</label><input type="text" data-f="zone_name" placeholder="example.com" value="${escapeHtml(t.zone_name || '')}" /></div>
+        <div><label>记录名</label><input type="text" data-f="record_name" placeholder="tgapi.example.com" value="${escapeHtml(t.record_name || '')}" /></div>
+        <div><label>记录类型</label><select data-f="record_type">
+          <option value="A"${typ === 'A' ? ' selected' : ''}>A（IPv4）</option>
+          <option value="AAAA"${typ === 'AAAA' ? ' selected' : ''}>AAAA（IPv6）</option>
+        </select></div>
+        <div><label>TTL（秒，1=自动）</label><input type="number" data-f="record_ttl" min="1" max="86400" value="${t.record_ttl}" /></div>
+        <div><label>保留 IP 数量</label><input type="number" data-f="keep_count" min="1" max="10" value="${t.keep_count}" /></div>
+        <div><label>代理状态</label>
+          <div class="switch"><input type="checkbox" data-f="record_proxied" ${t.record_proxied ? 'checked' : ''}/><span>橙云（Worker 需灰云）</span></div>
+        </div>
+        <div><label>探测域名（留空=用记录名）</label><input type="text" data-f="probe_host" placeholder="可留空" value="${escapeHtml(t.probe_host || '')}" /></div>
+        <div><label>探测路径（留空=用全局）</label><input type="text" data-f="probe_path" placeholder="可留空" value="${escapeHtml(t.probe_path || '')}" /></div>
+      </div>
+      <div class="fields" style="margin-top:10px">
+        <div><label>扫描间隔（分钟，0=不定时）</label><input type="number" data-f="interval_minutes" min="0" max="10080" value="${t.interval_minutes}" /></div>
+        <div><label>切换阈值（新 IP 快多少 % 才换）</label><input type="number" data-f="switch_margin_pct" min="0" max="100" value="${t.switch_margin_pct}" /></div>
+        <div class="span2">
+          <div class="switch"><input type="checkbox" data-f="auto_update" ${t.auto_update ? 'checked' : ''}/><span>扫描后自动更新解析（关闭则只扫描，点「扫描」也不会写入）</span></div>
+        </div>
+        <div class="span2">
+          <label>额外候选 IP / CIDR（每行一个，可选）</label>
+          <textarea data-f="extra_ips" placeholder="104.16.0.1&#10;104.17.128.1">${escapeHtml(t.extra_ips || '')}</textarea>
+        </div>
+      </div>
+      <div class="tmeta">
+        <div class="metarow"><span class="k">当前解析</span><span class="v" data-role="dns">—</span></div>
+        <div class="metarow"><span class="k">上次结果</span><span class="v" data-role="last">—</span></div>
+        <div class="metarow"><span class="k">下次扫描</span><span class="v" data-role="next">—</span></div>
+        <div class="metarow hidden" data-role="errrow"><span class="k">错误</span><span class="v err" data-role="err"></span></div>
+      </div>
+      <div class="tprog hidden" data-role="prog">
+        <div class="bar"><i style="width:0"></i></div>
+      </div>
+      <div class="tblock-foot">
+        <button class="primary sm" data-act="save" type="button" disabled>保存此块</button>
+        <button class="ghost sm" data-act="results" type="button">看结果</button>
+        <span class="note" data-role="savestate"></span>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderTargets(targets) {
+  const list = $('targetList');
+  const key = targets.map(t => t.id).join('|');
+  if (key !== builtKey) {
+    list.innerHTML = targets.length
+      ? targets.map(blockHtml).join('')
+      : '<div class="empty">还没有域名块。点下面的「添加域名块」开始。</div>';
+    builtKey = key;
+    targets.forEach(t => {
+      const el = blockEl(t.id);
+      if (el && collapsed.has(t.id)) el.classList.add('clip');
+    });
+  }
+  targets.forEach(t => updateBlock(t));
+  renderResultPicker(targets);
+}
+
+function updateBlock(t) {
+  const el = blockEl(t.id);
+  if (!el) return;
+  const st = t.state || {};
+  const isDirty = dirty.has(t.id);
+
+  el.classList.toggle('dirty', isDirty);
+  el.classList.toggle('off', !t.enabled);
+
+  if (!isDirty) {
+    TFIELDS.forEach(k => {
+      const input = el.querySelector(`[data-f="${k}"]`);
+      if (!input || document.activeElement === input) return;
+      if (input.type === 'checkbox') input.checked = !!t[k];
+      else input.value = t[k] === undefined || t[k] === null ? '' : t[k];
+    });
+  }
+
+  el.querySelector('[data-role="sub"]').innerHTML = t.record_name
+    ? `${escapeHtml(t.record_name)} · ${escapeHtml(t.record_type || 'A')}`
+    : '<span style="color:#f87171">未填写记录名</span>';
+
+  const chip = el.querySelector('[data-role="chip"]');
+  let cls = '', text = '空闲';
+  if (st.scanning) { cls = 'busy'; text = '扫描中'; }
+  else if (st.last_error) { cls = 'err'; text = '有错误'; }
+  else if (!t.enabled) { cls = ''; text = '已停用'; }
+  else if (st.last_apply && st.last_apply.applied) { cls = 'ok'; text = '已更新'; }
+  else if (st.last_apply && st.last_apply.reason) { cls = 'ok'; text = '正常'; }
+  chip.className = 'stchip' + (cls ? ' ' + cls : '');
+  chip.textContent = text;
+
+  const dns = (st.dns_records || []).map(r => r.content).filter(Boolean);
+  el.querySelector('[data-role="dns"]').innerHTML = dns.length
+    ? dns.map(ip => `<span class="chip">${escapeHtml(ip)}</span>`).join(' ')
+    : '<span style="color:var(--muted)">未读取</span>';
+
+  const rep = st.last_report;
+  el.querySelector('[data-role="last"]').textContent = rep
+    ? `${fmtTime(rep.finished_at)} · 可用 ${rep.alive}/${rep.tested} · 入选 ${(rep.chosen || []).length}`
+    : '还没扫描过';
+
+  const next = el.querySelector('[data-role="next"]');
+  if (st.scanning) next.textContent = '正在进行';
+  else if (!t.enabled) next.textContent = '块已停用';
+  else if (st.next_run_at) next.textContent = `${fmtRelative(st.next_run_at)}（${fmtTime(st.next_run_at)}）`;
+  else next.textContent = t.interval_minutes > 0 ? '定时总开关已关闭' : '不定时';
+
+  const errRow = el.querySelector('[data-role="errrow"]');
+  if (st.last_error) {
+    errRow.classList.remove('hidden');
+    el.querySelector('[data-role="err"]').textContent = st.last_error;
+  } else {
+    errRow.classList.add('hidden');
+  }
+
+  const prog = el.querySelector('[data-role="prog"]');
+  if (st.scanning) {
+    prog.classList.remove('hidden');
+    const p = st.progress || {};
+    const pct = p.total ? Math.min(100, (p.done / p.total) * 100) : 6;
+    prog.querySelector('i').style.width = pct + '%';
+  } else {
+    prog.classList.add('hidden');
+  }
+
+  el.querySelector('[data-act="save"]').disabled = !isDirty;
+  el.querySelector('[data-role="savestate"]').textContent = isDirty ? '有未保存的修改' : '';
+}
+
+function renderResultPicker(targets) {
+  const sel = $('resultPicker');
+  const key = targets.map(t => t.id).join('|');
+  if (sel.dataset.key !== key) {
+    sel.dataset.key = key;
+    sel.innerHTML = targets.map(t =>
+      `<option value="${t.id}">${escapeHtml(t.label || t.record_name || t.id)}</option>`).join('');
+  }
+  if (!targets.length) { activeId = null; return; }
+  if (!targets.some(t => t.id === activeId)) activeId = targets[0].id;
+  sel.value = activeId;
+}
+
+/* ---------------- 域名块交互 ---------------- */
+
+$('targetList').addEventListener('input', (ev) => {
+  const el = ev.target.closest('.tblock');
+  if (!el || !ev.target.dataset.f) return;
+  markDirty(el.dataset.id);
+});
+
+$('targetList').addEventListener('change', (ev) => {
+  const el = ev.target.closest('.tblock');
+  if (!el || !ev.target.dataset.f) return;
+  markDirty(el.dataset.id);
+});
+
+$('targetList').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-act]');
+  const block = ev.target.closest('.tblock');
+  if (!btn || !block) return;
+  const id = block.dataset.id;
+  const act = btn.dataset.act;
+
+  if (act === 'toggle') {
+    block.classList.toggle('clip');
+    if (block.classList.contains('clip')) collapsed.add(id); else collapsed.delete(id);
+    localStorage.setItem('cfip-collapsed', JSON.stringify([...collapsed]));
+    return;
+  }
+  if (act === 'save') return saveTarget(id);
+  if (act === 'results') { activeId = id; localStorage.setItem('cfip-active', id); renderResults(); return; }
+  if (act === 'scan') return scanTarget(id);
+  if (act === 'dns') return refreshDns(id);
+  if (act === 'test') return testTarget(id);
+  if (act === 'del') {
+    const t = targetById(id);
+    const name = t ? (t.label || t.record_name || id) : id;
+    if (!confirm(`删除域名块「${name}」？\n\n只会从本程序移除配置，不会删除 Cloudflare 上的 DNS 记录。`)) return;
+    try {
+      await api(`/api/targets/${id}`, { method: 'DELETE' });
+      dirty.delete(id);
+      if (activeId === id) activeId = null;
+      toast('已删除');
+      loadDashboard();
+    } catch (e) { toast(e.message, true); }
+  }
+});
+
+function markDirty(id) {
+  dirty.add(id);
+  const el = blockEl(id);
+  if (el) {
+    el.classList.add('dirty');
+    el.querySelector('[data-act="save"]').disabled = false;
+    el.querySelector('[data-role="savestate"]').textContent = '有未保存的修改';
+  }
+  updateSaveBar();
+}
+
+function updateSaveBar() {
+  const total = dirty.size + (globalDirty ? 1 : 0);
+  const bar = $('saveBar');
+  if (total > 0) {
+    bar.classList.remove('hidden');
+    $('saveBarText').textContent = `有 ${total} 处未保存的修改`;
+    $('saveAllBtn').disabled = false;
+  } else {
+    bar.classList.add('hidden');
+    $('saveAllBtn').disabled = true;
+  }
+}
+
+function collectTarget(id) {
+  const el = blockEl(id);
+  const body = {};
+  TFIELDS.forEach(k => {
+    const input = el.querySelector(`[data-f="${k}"]`);
+    if (!input) return;
+    body[k] = input.type === 'checkbox' ? input.checked : input.value;
+  });
+  return body;
+}
+
+async function saveTarget(id) {
+  try {
+    await api(`/api/targets/${id}`, { method: 'PUT', body: collectTarget(id) });
+    dirty.delete(id);
+    updateSaveBar();
+    toast('已保存');
+    loadDashboard();
+  } catch (e) { toast(e.message, true); }
+}
+
+$('saveAllBtn').addEventListener('click', async () => {
+  if (globalDirty) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: collectGlobal() });
+      globalDirty = false;
+    } catch (e) { toast(e.message, true); return; }
+  }
+  const ids = [...dirty];
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      await api(`/api/targets/${id}`, { method: 'PUT', body: collectTarget(id) });
+      dirty.delete(id);
+    } catch (e) { failed++; toast(e.message, true); }
+  }
+  updateSaveBar();
+  if (!failed) toast(`已保存 ${ids.length} 个域名块`);
+  loadDashboard();
+});
+
+$('saveBarBtn').addEventListener('click', () => $('saveAllBtn').click());
+
+$('addTargetBtn').addEventListener('click', async () => {
+  const s = TARGETS.length;
+  try {
+    const r = await api('/api/targets', { method: 'POST', body: { label: `域名块 ${s + 1}` } });
+    activeId = r.target.id;
+    localStorage.setItem('cfip-active', activeId);
+    builtKey = '';
+    toast('已添加，填好 Zone 与记录名后保存');
+    await loadDashboard();
+    const el = blockEl(r.target.id);
+    if (el) {
+      el.classList.remove('clip');
+      collapsed.delete(r.target.id);
+      el.querySelector('[data-f="zone_name"]').focus();
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  } catch (e) { toast(e.message, true); }
+});
+
+async function scanTarget(id) {
+  const t = targetById(id);
+  if (!t) return;
+  if (!t.record_name) { toast('先填记录名再扫描', true); return; }
+  try {
+    await api('/api/scan', { method: 'POST', body: { target_id: id } });
+    toast(t.auto_update ? '已开始扫描，完成后自动更新解析' : '已开始扫描（此块自动更新已关闭，只读）');
+    activeId = id;
+    localStorage.setItem('cfip-active', id);
+    setTimeout(loadDashboard, 600);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function refreshDns(id) {
+  try {
+    const r = await api('/api/refresh-dns', { method: 'POST', body: { target_id: id } });
+    if (!r.ok) throw new Error(r.error || '读取失败');
+    toast('已刷新解析状态');
+    loadDashboard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function testTarget(id) {
+  const el = blockEl(id);
+  if (!el) return;
+  const body = collectTarget(id);
+  body.cf_token = $('gf_cf_token').value;
+  if (!body.zone_name) { toast('先填 Zone 名称', true); return; }
+  try {
+    const r = await api('/api/test-token', { method: 'POST', body });
+    const recs = (r.records || []).map(x => x.content).join(', ') || '无同名记录';
+    toast(`Token 正常，Zone ${r.zone ? r.zone.name : '未校验'}；现有记录：${recs}`);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------------- 概览 / 结果 / 日志 ---------------- */
 
 function renderOverview(data) {
   const st = data.state || {};
   const s = data.settings || {};
-  const rep = st.last_report;
+  const targets = data.targets || [];
 
-  $('curName').textContent = s.record_name || '未配置';
-  const ips = (st.dns_records || []).map(r => r.content).filter(Boolean);
-  $('curIps').innerHTML = ips.length
-    ? ips.map(ip => `<span class="chip">${ip}</span>`).join('')
-    : '<span class="sub">尚未读取（点「刷新解析状态」）</span>';
-  $('curMeta').textContent = st.dns_checked_at ? '读取于 ' + fmtTime(st.dns_checked_at) : '';
-  if (data.settings && data.settings.record_type) {
-    $('curName').textContent = (s.record_name || '未配置') + ' · ' + data.settings.record_type;
+  const enabled = targets.filter(t => t.enabled).length;
+  $('targetCount').textContent = `${targets.length}`;
+  $('targetMeta').textContent = targets.length
+    ? `已启用 ${enabled} 个 · 定时扫描${s.schedule_enabled ? '开启' : '关闭'}`
+    : '还没有添加域名块';
+
+  const scanning = !!st.scanning;
+  const busyTarget = targets.find(t => (t.state || {}).scanning);
+  if (busyTarget) {
+    const p = (busyTarget.state || {}).progress || {};
+    $('scanState').textContent = busyTarget.label || busyTarget.record_name || '扫描中';
+    $('scanBar').style.width = p.total ? Math.min(100, (p.done / p.total) * 100) + '%' : '6%';
+    $('scanMeta').textContent = `${p.stage || '探测中'} ${p.done || 0} / ${p.total || 0}`;
+  } else {
+    $('scanState').textContent = '空闲';
+    $('scanBar').style.width = '0';
+    $('scanMeta').textContent = s.schedule_enabled ? '等待下一次调度' : '定时扫描已关闭';
   }
 
-  if (rep) {
-    $('lastScanTime').textContent = fmtTime(rep.finished_at);
+  const nextList = targets
+    .filter(t => (t.state || {}).next_run_at)
+    .sort((a, b) => a.state.next_run_at - b.state.next_run_at);
+  if (nextList.length) {
+    const n = nextList[0];
+    $('nextScan').textContent = fmtRelative(n.state.next_run_at);
+    $('nextMeta').textContent = `${n.label || n.record_name} · ${fmtTime(n.state.next_run_at)}`;
+    $('nextChips').innerHTML = nextList.slice(0, 3).map(t =>
+      `<span class="chip">${escapeHtml(t.label || t.record_name)}</span>`).join('');
+  } else {
+    $('nextScan').textContent = targets.length ? '已关闭' : '—';
+    $('nextMeta').textContent = targets.length ? '没有启用定时的域名块' : '';
+    $('nextChips').innerHTML = '';
+  }
+
+  let latest = null, latestTarget = null;
+  targets.forEach(t => {
+    const rep = (t.state || {}).last_report;
+    if (rep && (!latest || rep.finished_at > latest.finished_at)) { latest = rep; latestTarget = t; }
+  });
+  if (latest) {
+    $('lastScanTime').textContent = fmtTime(latest.finished_at);
     $('lastScanMeta').textContent =
-      `测试 ${rep.tested} 个候选，耗时 ${rep.duration}s，入选 ${(rep.chosen || []).length} 个`;
-    $('aliveCount').textContent = `${rep.alive} / ${rep.tested}`;
-    const pct = rep.tested ? Math.round((rep.alive / rep.tested) * 100) : 0;
-    $('aliveBar').style.width = Math.min(100, pct) + '%';
-    $('aliveMeta').textContent = `可用率 ${pct}%`;
+      `${latestTarget.label || latestTarget.record_name} · 可用 ${latest.alive}/${latest.tested} · 耗时 ${latest.duration}s`;
   } else {
-    $('aliveCount').textContent = '—';
-    $('aliveBar').style.width = '0';
+    $('lastScanTime').textContent = '—';
+    $('lastScanMeta').textContent = '还没有扫描记录';
   }
 
-  $('nextScan').textContent = st.next_run_at ? fmtRelative(st.next_run_at) : '已关闭';
-  $('intervalMeta').textContent = s.interval_minutes > 0
-    ? `每 ${s.interval_minutes} 分钟一次 · 自动更新${s.auto_update ? '开启' : '关闭'}`
-    : '定时扫描已关闭';
-
-  const chosen = (rep && rep.chosen) || [];
-  $('chosenChips').innerHTML = chosen.map(ip => `<span class="chip">${ip}</span>`).join('');
-
-  scanning = !!st.scanning;
-  const box = $('progressBox');
-  if (scanning) {
-    box.classList.remove('hidden');
-    const p = st.progress || {};
-    const done = p.done || 0, total = p.total || 0;
-    $('progressStage').textContent = p.stage || '扫描中';
-    $('progressText').textContent = total ? `${done} / ${total}` : '准备中';
-    $('progressBar').style.width = total ? Math.min(100, (done / total) * 100) + '%' : '8%';
-  } else {
-    box.classList.add('hidden');
-  }
   $('pulseDot').className = 'pulse' + (scanning ? ' busy' : '');
   $('statusText').textContent = scanning ? '扫描中' : '空闲';
   $('nextRun').textContent = st.next_run_at && !scanning ? '下次 ' + fmtRelative(st.next_run_at) : '';
 
-  $('scanApplyBtn').disabled = scanning;
-  $('scanDryBtn').disabled = scanning;
+  $('scanAllBtn').disabled = scanning || !targets.length;
+  $('scanAllDryBtn').disabled = scanning || !targets.length;
+  $('refreshAllBtn').disabled = !targets.length;
 }
 
-function renderResults(rep, dnsIps) {
+function renderResults() {
   const wrap = $('resultWrap');
+  const t = targetById(activeId);
+  const rep = t && t.state ? t.state.last_report : null;
   if (!rep || !rep.results || !rep.results.length) {
-    wrap.innerHTML = '<div class="empty">还没有扫描结果，点上面的按钮开始。</div>';
+    wrap.innerHTML = `<div class="empty">${t ? '这个域名块还没有扫描结果。' : '还没有域名块。'}</div>`;
     return;
   }
-  const used = new Set(dnsIps || []);
+  const used = new Set(((t.state && t.state.dns_records) || []).map(r => r.content));
   const chosen = new Set(rep.chosen || []);
   const rows = rep.results.slice(0, 40).map((r, i) => {
     const okRate = Math.round((r.success_rate || 0) * 100);
@@ -492,7 +913,7 @@ function renderResults(rep, dnsIps) {
     const colo = r.colo && r.colo !== '' ? r.colo : '—';
     return `<tr>
       <td>${i + 1}</td>
-      <td class="mono">${r.ip}</td>
+      <td class="mono">${escapeHtml(r.ip)}</td>
       <td>${colo}</td>
       <td class="mono">${r.ok ? r.ttfb_ms.toFixed(0) + ' ms' : '—'}</td>
       <td class="mono">${r.ok ? r.handshake_ms.toFixed(0) + ' ms' : '—'}</td>
@@ -504,8 +925,13 @@ function renderResults(rep, dnsIps) {
     <thead><tr><th>#</th><th>IP</th><th>机房</th><th>首字节</th><th>握手</th><th>成功率</th><th>标记</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <div class="note">只展示前 40 个。首字节为中位数，成功率低于阈值的不会被自动采用。</div>`;
-  $('resultHint').textContent = `共 ${rep.tested} 个候选，${rep.alive} 个可用`;
 }
+
+$('resultPicker').addEventListener('change', (ev) => {
+  activeId = ev.target.value;
+  localStorage.setItem('cfip-active', activeId);
+  renderResults();
+});
 
 function renderLogs(logs) {
   const el = $('logs');
@@ -524,25 +950,24 @@ function renderLogs(logs) {
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 async function loadDashboard() {
   try {
     const data = await api('/api/dashboard');
-    fillForm(data.settings || {});
+    TARGETS = data.targets || [];
+    STATES = (data.state || {}).targets || {};
+    fillGlobal(data.settings || {});
+    renderTargets(TARGETS);
     renderOverview(data);
-    renderResults(data.state && data.state.last_report, (data.state && data.state.dns_records || []).map(r => r.content));
+    renderResults();
     renderLogs(data.logs);
-    const st = data.state || {};
-    if (st.last_error && !scanning) {
-      $('resultHint').textContent = '错误：' + st.last_error;
-    }
-    if (!dirty && !st.dns_checked_at && !dnsTried && data.settings && data.settings.has_token) {
-      // 首次进入自动读一次当前解析，失败也只试一次，避免轮询里反复打 CF
+    updateSaveBar();
+
+    const first = TARGETS.find(t => t.configured && !((t.state || {}).dns_checked_at));
+    if (!dirty.size && first && !dnsTried && data.settings && data.settings.has_token) {
       dnsTried = true;
-      refreshDns(true);
+      api('/api/refresh-dns', { method: 'POST', body: { target_id: first.id } })
+        .then(() => loadDashboard())
+        .catch(() => {});
     }
   } catch (e) {
     if (String(e.message).includes('未登录')) {
@@ -552,84 +977,27 @@ async function loadDashboard() {
   }
 }
 
-/* ---------------- 操作 ---------------- */
+/* ---------------- 批量操作 ---------------- */
 
-async function startScan(apply) {
-  try {
-    await api('/api/scan', { method: 'POST', body: { apply } });
-    toast(apply ? '已开始扫描，完成后自动更新解析' : '已开始扫描（只读）');
-    setTimeout(loadDashboard, 600);
-  } catch (e) { toast(e.message, true); }
+function startScan(apply) {
+  api('/api/scan', { method: 'POST', body: { apply } })
+    .then(() => {
+      toast(apply ? '已开始扫描全部域名块' : '已开始扫描（只读）');
+      setTimeout(loadDashboard, 600);
+    })
+    .catch(e => toast(e.message, true));
 }
 
-$('scanApplyBtn').addEventListener('click', () => startScan(true));
-$('scanDryBtn').addEventListener('click', () => startScan(false));
-
-async function refreshDns(silent) {
+$('scanAllBtn').addEventListener('click', () => startScan(true));
+$('scanAllDryBtn').addEventListener('click', () => startScan(false));
+$('refreshAllBtn').addEventListener('click', async () => {
   try {
-    const r = await api('/api/refresh-dns', { method: 'POST' });
-    if (!r.ok) throw new Error(r.error || '读取失败');
-    if (!silent) toast('已刷新解析状态');
-    loadDashboard();
-  } catch (e) { if (!silent) toast(e.message, true); }
-}
-$('refreshDnsBtn').addEventListener('click', () => refreshDns(false));
-
-$('testTokenBtn').addEventListener('click', async () => {
-  const btn = $('testTokenBtn');
-  btn.disabled = true;
-  btn.textContent = '测试中…';
-  try {
-    const r = await api('/api/test-token', {
-      method: 'POST',
-      body: { cf_token: $('cf_token').value, zone_name: $('zone_name').value, record_name: $('record_name').value },
-    });
-    const recs = (r.records || []).map(x => x.content).join(', ') || '无同名记录';
-    toast(`Token 正常，Zone ${r.zone ? r.zone.name : '未校验'}，现有记录：${recs}`);
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '测试 Token 与记录';
-  }
-});
-
-function collect() {
-  const num = (id) => Number($(id).value);
-  return {
-    cf_token: $('cf_token').value,
-    zone_name: $('zone_name').value,
-    record_name: $('record_name').value,
-    record_type: $('record_type').value,
-    record_ttl: num('record_ttl'),
-    record_proxied: $('record_proxied').checked,
-    keep_count: num('keep_count'),
-    probe_host: $('probe_host').value,
-    probe_path: $('probe_path').value,
-    candidate_count: num('candidate_count'),
-    sample_rounds: num('sample_rounds'),
-    concurrency: num('concurrency'),
-    timeout: num('timeout'),
-    min_success_rate: num('min_success_rate'),
-    max_ttfb_ms: num('max_ttfb_ms'),
-    extra_ips: $('extra_ips').value,
-    interval_minutes: num('interval_minutes'),
-    auto_update: $('auto_update').checked,
-    switch_margin_pct: num('switch_margin_pct'),
-  };
-}
-
-$('saveBtn').addEventListener('click', async () => {
-  try {
-    await api('/api/settings', { method: 'PUT', body: collect() });
-    dirty = false;
-    toast('设置已保存');
+    const r = await api('/api/refresh-dns', { method: 'POST', body: {} });
+    if (!r.ok) throw new Error(r.error || '部分读取失败');
+    toast('已刷新全部解析');
     loadDashboard();
   } catch (e) { toast(e.message, true); }
 });
-
-document.querySelectorAll('#settingsForm input, #settingsForm textarea, #settingsForm select')
-  .forEach(el => el.addEventListener('input', () => { dirty = true; }));
 
 boot();
 </script>
