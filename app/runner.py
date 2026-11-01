@@ -20,6 +20,11 @@ from .store import DEFAULT_PROBE_PATH, Store
 
 LOGGER = logging.getLogger("cfip")
 
+# 现任成功率比本轮最优低这么多（15 个百分点）就让位。
+# 0.67 的 IP 只比 1.00 低 0.33，但它意味着每 3 次命中就有 1 次失败，
+# 靠 min_success_rate=0.5 这条线是筛不掉的。
+RATE_GAP = 0.15
+
 
 class RingLogHandler(logging.Handler):
     def __init__(self, capacity: int = 500) -> None:
@@ -226,7 +231,12 @@ class Optimizer:
         state.progress = {"done": 0, "total": 0, "stage": "准备候选 IP"}
         state.last_error = ""
         state.last_run_at = time.time()
-        LOGGER.info("开始扫描 %s（目标 %s，触发：%s）", label, host, trigger)
+        probe_path = str(
+            target.get("probe_path") or settings.get("probe_path") or DEFAULT_PROBE_PATH
+        )
+        LOGGER.info(
+            "开始扫描 %s（探针 https://%s%s，触发：%s）", label, host, probe_path, trigger
+        )
 
         def on_progress(payload: Dict[str, Any]) -> None:
             state.progress = {
@@ -269,11 +279,11 @@ class Optimizer:
                 host=host,
                 ip_version=ip_version,
                 candidate_count=int(settings.get("candidate_count") or 200),
-                rounds=int(settings.get("sample_rounds") or 2),
+                rounds=int(settings.get("sample_rounds") or 3),
                 concurrency=int(settings.get("concurrency") or 48),
                 timeout=float(settings.get("timeout") or 4.0),
                 port=int(settings.get("probe_port") or 443),
-                path=str(target.get("probe_path") or settings.get("probe_path") or DEFAULT_PROBE_PATH),
+                path=probe_path,
                 extra_ips=candidates_extra,
                 min_success_rate=float(settings.get("min_success_rate") or 0.5),
                 max_ttfb_ms=float(settings.get("max_ttfb_ms") or 3000),
@@ -434,20 +444,20 @@ class Optimizer:
             return stat_by_ip.get(ip)
 
         # 现任是否健康：参与本轮测试且成功率达标（被边缘拒绝的一律不算）
-        healthy_current = [
-            ip
-            for ip in current_ips
-            if stat_of(ip) is not None
-            and not stat_of(ip).blocked
-            and stat_of(ip).success_rate >= min_rate
-        ]
-        unhealthy_current = [ip for ip in current_ips if ip not in healthy_current]
+        best_new_rate = max(
+            (stat_of(ip).success_rate for ip in want if stat_of(ip)), default=0.0
+        )
+        healthy_current, weak_current, unhealthy_current = _split_current(
+            current_ips, stat_by_ip, min_rate, best_new_rate
+        )
         healthy_ranked = sorted(
             healthy_current, key=lambda ip: stat_of(ip).ttfb_ms if stat_of(ip) else 9e9
         )
+
         # 只换该换的：健康的现任优先留住，缺的名额用本轮最优补齐。
         # 这样一次更新最多替换坏 IP，不会因为排名微调就把整组记录翻一遍。
         plan = _merge_keep(healthy_ranked, want, keep)
+
 
         need = False
         if unhealthy_current:
@@ -456,6 +466,13 @@ class Optimizer:
             detail = f"，其中 {len(rejected)} 个被边缘拒绝" if rejected else ""
             decision["reason"] = (
                 f"现任有 {len(unhealthy_current)} 个 IP 本轮不达标{detail}，按需替换"
+            )
+        elif weak_current:
+            need = True
+            worst = min(stat_of(ip).success_rate for ip in weak_current if stat_of(ip))
+            decision["reason"] = (
+                f"现任有 {len(weak_current)} 个 IP 成功率偏低"
+                f"（最低 {worst:.0%} vs 本轮最优 {best_new_rate:.0%}），换成更稳的"
             )
         elif len(healthy_current) < min(keep, len(want)):
             need = True
@@ -488,8 +505,9 @@ class Optimizer:
             LOGGER.info("%s：%s", label, decision["reason"])
             return decision
 
-        # 有坏 IP 时按「健康现任 + 最优补齐」写；纯粹追求速度时直接换成提速方案。
-        final_ips = plan if unhealthy_current else want
+        # 有坏 IP / 明显更弱的 IP 时按「健康现任 + 最优补齐」写；
+        # 纯粹追求速度时直接整体换成提速方案。
+        final_ips = want if not (unhealthy_current or weak_current) else plan
 
         try:
             summary = await asyncio.to_thread(
@@ -620,6 +638,29 @@ def _slim_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "proxied": record.get("proxied"),
         "comment": record.get("comment"),
     }
+
+
+def _split_current(
+    current_ips: List[str],
+    stats: Dict[str, Any],
+    min_rate: float,
+    best_new_rate: float,
+) -> Tuple[List[str], List[str], List[str]]:
+    """把现任 IP 分成「可留 / 明显更弱 / 不可用」三档。
+
+    - 不可用：没测到、被边缘拒绝、成功率低于阈值
+    - 明显更弱：没跌破阈值，但比本轮最优低 15 个百分点以上（0.67 vs 1.00）
+    """
+    keep, weak, bad = [], [], []
+    for ip in current_ips:
+        stat = stats.get(ip)
+        if stat is None or stat.blocked or stat.success_rate < min_rate:
+            bad.append(ip)
+        elif stat.success_rate + RATE_GAP <= best_new_rate:
+            weak.append(ip)
+        else:
+            keep.append(ip)
+    return keep, weak, bad
 
 
 def _merge_keep(healthy: List[str], want: List[str], keep: int) -> List[str]:

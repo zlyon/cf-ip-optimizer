@@ -150,7 +150,7 @@ def sanitize(incoming: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any
     data["probe_path"] = path if path.startswith("/") else "/" + path
     data["probe_port"] = _clamp(incoming.get("probe_port"), 443, 1, 65535)
     data["candidate_count"] = _clamp(incoming.get("candidate_count"), 200, 10, 5000)
-    data["sample_rounds"] = _clamp(incoming.get("sample_rounds"), 2, 1, 6)
+    data["sample_rounds"] = _clamp(incoming.get("sample_rounds"), 3, 1, 6)
     data["concurrency"] = _clamp(incoming.get("concurrency"), 48, 1, 256)
     data["timeout"] = _clamp(incoming.get("timeout"), 4.0, 1.0, 30.0)
     data["min_success_rate"] = _clamp(incoming.get("min_success_rate"), 0.5, 0.0, 1.0)

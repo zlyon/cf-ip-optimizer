@@ -27,7 +27,7 @@ from app.scanner import (  # noqa: E402
     sample_candidates,
     select_qualified,
 )
-from app.runner import _merge_keep  # noqa: E402
+from app.runner import _merge_keep, _split_current  # noqa: E402
 from app.store import Store, hash_password, verify_password  # noqa: E402
 
 
@@ -318,6 +318,43 @@ class TargetSanitizeTest(unittest.TestCase):
         self.assertEqual(data["record_name"], "cdn.a.com")
         self.assertEqual(data["extra_ips"], "1.1.1.1")
         self.assertEqual(data["interval_minutes"], 60)
+
+
+class SplitCurrentTest(unittest.TestCase):
+    """现任 IP 分档：能留 / 明显更弱 / 直接用不了。"""
+
+    def _stat(self, ok, total, blocked=""):
+        s = IPStat(ip="x", ok=ok, total=total, blocked=blocked)
+        if ok:
+            s.ttfb_samples = [200.0] * ok
+        return s
+
+    def test_blocked_and_untested_are_bad(self):
+        stats = {"a": self._stat(0, 6, "边缘拒绝 403"), "b": None}
+        keep, weak, bad = _split_current(["a", "b"], stats, 0.5, 1.0)
+        self.assertEqual((keep, weak, bad), ([], [], ["a", "b"]))
+
+    def test_below_threshold_is_bad(self):
+        stats = {"a": self._stat(2, 6)}
+        keep, weak, bad = _split_current(["a"], stats, 0.5, 1.0)
+        self.assertEqual((keep, weak, bad), ([], [], ["a"]))
+
+    def test_flaky_but_passing_is_weak(self):
+        # 6 轮成 4 次 = 0.67，过得了 0.5 的线，但比 1.00 差太多
+        stats = {"a": self._stat(4, 6)}
+        keep, weak, bad = _split_current(["a"], stats, 0.5, 1.0)
+        self.assertEqual((keep, weak, bad), ([], ["a"], []))
+
+    def test_full_rate_current_is_kept(self):
+        stats = {"a": self._stat(6, 6)}
+        keep, weak, bad = _split_current(["a"], stats, 0.5, 1.0)
+        self.assertEqual((keep, weak, bad), (["a"], [], []))
+
+    def test_small_gap_is_not_weak(self):
+        # 0.9 vs 1.0 差 0.1，不到 15 个百分点，不该被换
+        stats = {"a": IPStat(ip="a", ok=9, total=10)}
+        keep, weak, bad = _split_current(["a"], stats, 0.5, 1.0)
+        self.assertEqual((keep, weak, bad), (["a"], [], []))
 
 
 class MergeKeepTest(unittest.TestCase):

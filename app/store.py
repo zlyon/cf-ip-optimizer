@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 # 「边缘正常但业务路由 403」的 IP（例如 172.65.212.5 对 GitHub 反代全 403）。
 DEFAULT_PROBE_PATH = "/"
 LEGACY_PROBE_PATH = "/cdn-cgi/trace"
+LEGACY_SAMPLE_ROUNDS = 2
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
     # --- Cloudflare（全局共用，多个域名块共享同一个 Token）---
@@ -32,7 +33,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "probe_path": DEFAULT_PROBE_PATH,
     "probe_port": 443,
     "candidate_count": 200,
-    "sample_rounds": 2,
+    "sample_rounds": 3,
     "concurrency": 48,
     "timeout": 4.0,
     "min_success_rate": 0.5,
@@ -247,10 +248,13 @@ class Store:
         self.upsert_target(target)
 
     def _migrate_probe_path(self) -> None:
-        """把旧的默认探测路径 /cdn-cgi/trace 换成业务路径 /。
+        """把两个「旧默认值」换成新的。
 
-        该端点由 CF 边缘自己应答，不经过 Worker/源站，用它当探针会漏掉
-        「边缘正常、业务路由 403」的 IP。只在用户没改过默认值时才迁移。
+        1. 探测路径 /cdn-cgi/trace → /：该端点由 CF 边缘自己应答，不经过
+           Worker/源站，用它当探针会漏掉「边缘正常、业务路由 403」的 IP。
+        2. 采样轮数 2 → 3：2 轮时一次抖动就是 50%，刚好卡在 0.5 阈值上，
+           时好时坏的 IP 常常蒙混过关。
+        只在用户没动过默认值时才迁移。
         """
         with self._lock:
             row = self._conn.execute(
@@ -262,9 +266,15 @@ class Store:
                 payload = json.loads(row["payload"])
             except json.JSONDecodeError:
                 return
-            if payload.get("probe_path") != LEGACY_PROBE_PATH:
+            touched = False
+            if payload.get("probe_path") == LEGACY_PROBE_PATH:
+                payload["probe_path"] = DEFAULT_PROBE_PATH
+                touched = True
+            if payload.get("sample_rounds") == LEGACY_SAMPLE_ROUNDS:
+                payload["sample_rounds"] = DEFAULT_SETTINGS["sample_rounds"]
+                touched = True
+            if not touched:
                 return
-            payload["probe_path"] = DEFAULT_PROBE_PATH
             self._conn.execute(
                 "UPDATE settings SET payload = ?, updated_at = ? WHERE id = 1",
                 (json.dumps(payload, ensure_ascii=False), time.time()),

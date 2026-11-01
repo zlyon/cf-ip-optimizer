@@ -259,6 +259,24 @@ def _parse_colo(headers: Dict[str, str], body: bytes) -> str:
     return ""
 
 
+_TLS_CTX: Optional[ssl.SSLContext] = None
+
+
+def _tls_context() -> ssl.SSLContext:
+    """全进程共用一个不校验证书的 context。
+
+    每次探测都 create_default_context 会重复加载 CA 库，几百次探测下来纯属浪费；
+    这里探测的是 IP + 固定 SNI，本来就不需要校验链。
+    """
+    global _TLS_CTX
+    if _TLS_CTX is None:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        _TLS_CTX = ctx
+    return _TLS_CTX
+
+
 async def _probe_once(
     ip: str,
     host: str,
@@ -274,13 +292,10 @@ async def _probe_once(
     try:
         family = socket.AF_INET6 if ":" in ip else socket.AF_INET
         if tls:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
             connect = asyncio.open_connection(
                 host=ip,
                 port=port,
-                ssl=ctx,
+                ssl=_tls_context(),
                 server_hostname=host,
                 family=family,
             )
@@ -493,9 +508,11 @@ async def scan(
             if progress and (done % 10 == 0 or done == total_tasks):
                 progress({"done": done, "total": total_tasks})
 
-    tasks = [worker(ip) for ip in candidates for _ in range(max(1, rounds))]
-    if tasks:
-        await asyncio.gather(*tasks)
+    # 按轮次串行：同一 IP 的多次探测分散在不同时间点，才测得出手抖。
+    # 早先是把同一 IP 的 N 次探测一起丢进并发池，等于在同一瞬间测 N 次，
+    # 结果高度相关 —— 采样轮数形同虚设，时好时坏的 IP 照样拿满分。
+    for _ in range(max(1, rounds)):
+        await asyncio.gather(*[worker(ip) for ip in candidates])
 
     results = sorted(
         stats.values(),
