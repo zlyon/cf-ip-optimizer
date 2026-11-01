@@ -37,7 +37,12 @@ logging.basicConfig(
 )
 LOGGER = logging.getLogger("cfip")
 
-store = Store(DB_PATH)
+try:
+    store = Store(DB_PATH)
+except RuntimeError as exc:
+    # 数据库打不开时直接给可读结论，不要把 sqlite 的 traceback 刷满日志
+    LOGGER.error("%s", exc)
+    raise SystemExit(1) from None
 optimizer = Optimizer(store)
 _login_failures: Dict[str, list] = {}
 

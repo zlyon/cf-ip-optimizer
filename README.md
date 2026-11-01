@@ -58,6 +58,8 @@ services:
       - ./data:/data
     environment:
       TZ: Asia/Shanghai
+      PUID: "1000"      # /data 的属主 UID，容器会 chown 成这个再降权运行
+      PGID: "1000"      # 同上，GID
     restart: unless-stopped
 ```
 
@@ -69,7 +71,7 @@ docker compose up -d
 
 打开 `http://NAS_IP:8787`，首次访问会让你设置管理密码（≥8 位）。
 
-群晖上如果 `/data` 写不进去（容器内是 UID 1000），在 compose 里加一行 `user: "你的UID:你的GID"`，或先 `chown -R 1000:1000 ./data`。
+容器以 root 启动、把 `/data` 的属主改成 `PUID:PGID` 后立刻降权，再跑服务。所以宿主机上 `./data` 是 root 建的也没关系，**不用手动 chown**。想让数据文件的属主跟你账号一致，把 `PUID`/`PGID` 改成 `id -u` / `id -g` 的输出即可。
 
 ### 镜像地址
 
@@ -160,6 +162,33 @@ Cloudflare 不允许同名 CNAME 与 A/AAAA 记录并存，请先在 DNS 页面�
 - **不要拿它当"加速器"**：它解决的是"解析到坏 IP"，不是"提升带宽"。物理距离决定的延迟改不了。
 - **API Token 存明文**在容器内 SQLite 里（`/data/app.db`）。这个文件等于你的 DNS 写权限，别把 `data` 目录丢到公开位置。
 
+## 常见问题
+
+### 容器反复重启，日志里是 `sqlite3.OperationalError: unable to open database file`
+
+数据目录写不进去。SQLite 只会回这一句，看不出是权限问题，实际原因通常是：
+
+- 宿主机上的 `./data` 是 docker 自动建的，属主是 **root**、权限 0755，而容器里的进程是 **uid 1000**
+- 或者这个路径被挂成了只读
+
+现在镜像会在启动时自动 `chown` 并降权，正常不会再有这个问题。如果还是报错，日志会直接指出是哪个目录、什么权限、当前 uid 是多少，比如：
+
+```
+数据目录不可写：/data（drwxr-xr-x uid=0 gid=0（root:root））
+当前进程 uid=1000。
+宿主机上执行一次即可修复：sudo chown -R 1000:1000 <你挂载的 data 目录>
+```
+
+对应处理：`sudo chown -R 1000:1000 ./data`，或者把 `PUID`/`PGID` 设成该目录的属主。
+
+### 首次使用报「同名 CNAME 与 A 记录并存」
+
+Cloudflare 不允许同一主机名同时有 CNAME 和 A。先去 DNS 页面删掉那条 CNAME（Worker 场景还要确认 Route 已配好），再点扫描。工具会明确报错，不会静默跳过。
+
+### 扫描结果全是 `LAX` 而且延迟很高
+
+说明这条宽带的出口本来就在美西。优选 IP 只能避开被阻断的 IP，改不了物理距离。
+
 ## 数据与备份
 
 所有状态在 `/data/app.db`（一个 SQLite 文件）：管理密码哈希、CF Token、配置、扫描历史。备份复制这一个文件即可。
@@ -183,8 +212,9 @@ app/
   store.py       SQLite 持久化（settings 全局 + targets 域名块 + scans 历史）
   static/
     index.html   管理页面（原生 JS，无构建）
+docker-entrypoint.py  容器入口：修正挂载目录属主后降权到 PUID:PGID
 tests/
-  test_core.py   25 项单测：采样、colo 解析、记录同步、多块持久化、迁移、排期
+  test_core.py   27 项单测：采样、colo 解析、记录同步、多块持久化、迁移、排期、启动报错
 ```
 
 ## License

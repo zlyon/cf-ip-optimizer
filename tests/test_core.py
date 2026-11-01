@@ -377,5 +377,55 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(opt.states, {})
 
 
+class StoreStartupErrorTest(unittest.TestCase):
+    """容器里最常见的事故：挂载目录不可写，sqlite 只回一句
+    "unable to open database file"，看不出是权限问题。"""
+
+    def test_creates_missing_nested_data_dir(self):
+        base = tempfile.mkdtemp(prefix="cfip-nested-")
+        self.addCleanup(shutil.rmtree, base, True)
+        deep = os.path.join(base, "a", "b", "c", "app.db")
+        store = Store(deep)
+        self.addCleanup(store.close)
+        self.assertTrue(os.path.isfile(deep))
+
+    def test_error_names_the_path_and_is_actionable(self):
+        base = tempfile.mkdtemp(prefix="cfip-blocked-")
+        self.addCleanup(shutil.rmtree, base, True)
+        blocker = os.path.join(base, "iamafile")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        bad = os.path.join(blocker, "sub", "app.db")
+        with self.assertRaises(RuntimeError) as ctx:
+            Store(bad)
+        msg = str(ctx.exception)
+        self.assertIn("数据目录", msg)
+        # 必须带上路径，否则用户不知道该去改哪个目录
+        self.assertIn("iamafile", msg)
+
+
+class EntrypointSmokeTest(unittest.TestCase):
+    """入口脚本要能原样把命令 exec 出去（容器里靠它降权后启动 uvicorn）。"""
+
+    def test_execs_the_given_command(self):
+        import subprocess
+        import sys
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        probe = os.path.join(_TMP_DIR, "ep_probe.py")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("print('ENTRYPOINT_RAN')\n")
+        env = dict(os.environ, DATA_DIR=_TMP_DIR)
+        result = subprocess.run(
+            [sys.executable, os.path.join(root, "docker-entrypoint.py"), sys.executable, probe],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertIn("ENTRYPOINT_RAN", result.stdout)
+        self.assertEqual(result.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

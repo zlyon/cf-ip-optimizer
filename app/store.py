@@ -93,12 +93,73 @@ def new_target_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _describe_dir(path: str) -> str:
+    """给出目录/文件的属主与权限，用于把 sqlite 的干瘪报错变成可操作提示。"""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return f"{path}（不存在）"
+    import stat as _stat
+
+    mode = _stat.filemode(st.st_mode)
+    owner = f"uid={st.st_uid} gid={st.st_gid}"
+    try:
+        import grp
+        import pwd
+
+        owner += f"（{pwd.getpwuid(st.st_uid).pw_name}:{grp.getgrgid(st.st_gid).gr_name}）"
+    except Exception:
+        pass
+    return f"{path}（{mode} {owner}）"
+
+
+def _connect_sqlite(path: str) -> "sqlite3.Connection":
+    """打开数据库，失败时抛出带排查线索的 RuntimeError。
+
+    容器里最典型的事故是 bind mount 的目录由 root 创建（默认 0755），
+    而进程跑在非 root 用户下，导致 sqlite 只报 unable to open database file，
+    看不出是权限问题。这里提前判定并说清楚。
+    """
+    directory = os.path.dirname(path) or "."
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except PermissionError as exc:
+        raise RuntimeError(
+            f"数据目录无法创建：{_describe_dir(directory)}\n"
+            f"当前进程 uid={os.geteuid() if hasattr(os, 'geteuid') else '?'}，"
+            f"请确认挂载目录对该用户可写，或在 compose 里设置 PUID/PGID。"
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"数据目录不可用：{directory}\n"
+            f"原始错误：{exc}\n"
+            f"请确认挂载点存在且路径的每一级都是目录，而不是某个文件。"
+        ) from exc
+
+    if not os.access(directory, os.W_OK):
+        raise RuntimeError(
+            f"数据目录不可写：{_describe_dir(directory)}\n"
+            f"当前进程 uid={os.geteuid() if hasattr(os, 'geteuid') else '?'}。\n"
+            f"宿主机上执行一次即可修复：sudo chown -R 1000:1000 <你挂载的 data 目录>\n"
+            f"（或用 PUID/PGID 指定成该目录的属主）"
+        )
+
+    try:
+        return sqlite3.connect(path, check_same_thread=False)
+    except sqlite3.OperationalError as exc:
+        raise RuntimeError(
+            f"无法打开数据库：{_describe_dir(path)}\n"
+            f"目录：{_describe_dir(directory)}\n"
+            f"原始错误：{exc}\n"
+            f"常见原因：挂载目录属主不是容器运行用户，或该路径被挂成了只读。"
+        ) from exc
+
+
 class Store:
     def __init__(self, path: str) -> None:
         self.path = path
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn = _connect_sqlite(path)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._migrate_legacy_target()

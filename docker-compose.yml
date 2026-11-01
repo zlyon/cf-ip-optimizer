@@ -8,8 +8,15 @@ services:
       - ./data:/data
     environment:
       TZ: Asia/Shanghai
-      # 需要非 1000 用户写 /data 时，取消下面一行注释并改成你的 UID:GID
-      # user: "1026:100"
+      # 入口脚本会把 /data 的属主改成 PUID:PGID 再降权运行。
+      # 宿主机上 ./data 的属主不是 1000:1000 时（Synology 常见是 root 或你的账号），
+      # 把这里改成对应数字即可，不用手动 chown。
+      PUID: "1000"
+      PGID: "1000"
+    # 如果宿主机策略不允许容器以 root 启动，可强制指定运行用户。
+    # 注意：此时入口脚本没有权限改属主，需要先把 ./data 改成该用户可写：
+    #   sudo chown -R 1026:100 ./data
+    # user: "1026:100"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status==200 else 1)"]
